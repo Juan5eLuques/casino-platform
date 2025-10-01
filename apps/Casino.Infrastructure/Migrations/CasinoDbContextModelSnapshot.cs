@@ -112,15 +112,27 @@ namespace Casino.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AdminDomain")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<string>("CorsOrigins")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Domain")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
 
                     b.Property<string>("Locale")
                         .IsRequired()
@@ -135,6 +147,9 @@ namespace Casino.Infrastructure.Migrations
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid");
 
+                    b.Property<JsonDocument>("Settings")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -142,10 +157,23 @@ namespace Casino.Infrastructure.Migrations
                     b.Property<JsonDocument>("Theme")
                         .HasColumnType("jsonb");
 
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("AdminDomain")
+                        .IsUnique()
+                        .HasFilter("\"AdminDomain\" IS NOT NULL");
 
                     b.HasIndex("Code")
                         .IsUnique();
+
+                    b.HasIndex("Domain")
+                        .IsUnique()
+                        .HasFilter("\"Domain\" IS NOT NULL");
 
                     b.HasIndex("OperatorId");
 
@@ -175,6 +203,41 @@ namespace Casino.Infrastructure.Migrations
                     b.HasIndex("GameId");
 
                     b.ToTable("BrandGames");
+                });
+
+            modelBuilder.Entity("Casino.Domain.Entities.BrandProviderConfig", b =>
+                {
+                    b.Property<Guid>("BrandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<bool>("AllowNegativeOnRollback")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<JsonDocument>("Meta")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Secret")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("BrandId", "ProviderCode");
+
+                    b.ToTable("BrandProviderConfigs");
                 });
 
             modelBuilder.Entity("Casino.Domain.Entities.CashierPlayer", b =>
@@ -555,6 +618,17 @@ namespace Casino.Infrastructure.Migrations
                     b.Navigation("Game");
                 });
 
+            modelBuilder.Entity("Casino.Domain.Entities.BrandProviderConfig", b =>
+                {
+                    b.HasOne("Casino.Domain.Entities.Brand", "Brand")
+                        .WithMany("ProviderConfigs")
+                        .HasForeignKey("BrandId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Brand");
+                });
+
             modelBuilder.Entity("Casino.Domain.Entities.CashierPlayer", b =>
                 {
                     b.HasOne("Casino.Domain.Entities.BackofficeUser", "Cashier")
@@ -669,6 +743,8 @@ namespace Casino.Infrastructure.Migrations
                     b.Navigation("LedgerEntries");
 
                     b.Navigation("Players");
+
+                    b.Navigation("ProviderConfigs");
                 });
 
             modelBuilder.Entity("Casino.Domain.Entities.Game", b =>

@@ -33,11 +33,22 @@ public record AssignGameToBrandRequest(
     int DisplayOrder = 0,
     string[]? Tags = null);
 
+// DTO para admin que incluye BrandId
 public record GetBrandGameResponse(
     Guid BrandId,
     Guid GameId,
     string GameCode,
     string GameName,
+    string Provider,
+    bool Enabled,
+    int DisplayOrder,
+    string[] Tags);
+
+// DTO para catálogo público que no expone BrandId
+public record CatalogGameResponse(
+    Guid GameId,
+    string Code,
+    string Name,
     string Provider,
     bool Enabled,
     int DisplayOrder,

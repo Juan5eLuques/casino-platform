@@ -14,118 +14,56 @@ public static class AdminEndpoints
         var group = app.MapGroup("/api/v1/admin")
             .WithTags("Admin");
 
-        // Backoffice Users
-        group.MapPost("/users", CreateBackofficeUser)
-            .WithName("AdminCreateBackofficeUser");
-        group.MapGet("/users", GetBackofficeUsers)
-            .WithName("AdminGetBackofficeUsers");
+        // NOTE: Removed duplicate endpoints - now handled by dedicated endpoint classes:
+        // - BackofficeUserEndpoints handles /users routes
+        // - PlayerManagementEndpoints handles /players routes  
+        // - OperatorEndpoints handles /operators routes
+        // - BrandGameEndpoints handles /brands/{id}/games routes
+        
+        // Keeping only unique endpoints not covered by other endpoint classes:
+
+        // User status updates (specific endpoint not covered elsewhere)
         group.MapPatch("/users/{id:guid}/status", UpdateUserStatus)
-            .WithName("AdminUpdateUserStatus");
+            .WithName("AdminUpdateUserStatus")
+            .WithTags("Admin");
 
-        // Players Management
-        group.MapGet("/players", GetPlayers)
-            .WithName("AdminGetPlayers");
+        // Player status updates (specific endpoint not covered elsewhere)  
         group.MapPatch("/players/{id:guid}/status", UpdatePlayerStatus)
-            .WithName("AdminUpdatePlayerStatus");
-        group.MapPost("/players/{id:guid}/wallet/adjust", AdjustPlayerWallet)
-            .WithName("AdminAdjustPlayerWallet");
+            .WithName("AdminUpdatePlayerStatus")
+            .WithTags("Admin");
 
-        // Cashier Management
+        // Cashier Management (unique functionality)
         group.MapPost("/cashiers/{cashierId:guid}/assign-player/{playerId:guid}", AssignPlayerToCashier)
-            .WithName("AdminAssignPlayerToCashier");
+            .WithName("AdminAssignPlayerToCashier")
+            .WithTags("Admin");
         group.MapGet("/cashiers/{cashierId:guid}/players", GetCashierPlayers)
-            .WithName("AdminGetCashierPlayers");
+            .WithName("AdminGetCashierPlayers")
+            .WithTags("Admin");
         group.MapDelete("/cashiers/{cashierId:guid}/players/{playerId:guid}", UnassignPlayerFromCashier)
-            .WithName("AdminUnassignPlayerFromCashier");
+            .WithName("AdminUnassignPlayerFromCashier")
+            .WithTags("Admin");
 
-        // Audit endpoints
+        // Audit endpoints (unique functionality)
         group.MapGet("/audit/backoffice", GetBackofficeAudit)
-            .WithName("AdminGetBackofficeAudit");
+            .WithName("AdminGetBackofficeAudit")
+            .WithTags("Admin");
         group.MapGet("/audit/provider", GetProviderAudit)
-            .WithName("AdminGetProviderAudit");
+            .WithName("AdminGetProviderAudit")
+            .WithTags("Admin");
     }
 
-    public record CreateBackofficeUserRequest(
-        string Username,
-        string Password,
-        BackofficeUserRole Role,
-        Guid? OperatorId = null);
-
+    // Keep only DTOs for endpoints that remain
     public record UpdateUserStatusRequest(BackofficeUserStatus Status);
     public record UpdatePlayerStatusRequest(PlayerStatus Status);
-    public record AdjustWalletRequest(long Amount, string Reason, string? Notes = null);
 
-    private static async Task<IResult> CreateBackofficeUser(
-        [FromBody] CreateBackofficeUserRequest request,
-        CasinoDbContext context,
-        IAuditService auditService,
-        ILogger<Program> logger)
-    {
-        try
-        {
-            var existingUser = await context.BackofficeUsers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(u => u.Username == request.Username);
-
-            if (existingUser != null)
-            {
-                return Results.Problem("Username Already Exists", statusCode: 409);
-            }
-
-            var user = new BackofficeUser
-            {
-                Id = Guid.NewGuid(),
-                Username = request.Username,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-                Role = request.Role,
-                OperatorId = request.OperatorId,
-                Status = BackofficeUserStatus.ACTIVE,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            context.BackofficeUsers.Add(user);
-            await context.SaveChangesAsync();
-
-            // TODO: Get current admin user ID from JWT/auth context
-            var currentUserId = Guid.NewGuid(); // Placeholder
-            await auditService.LogBackofficeActionAsync(currentUserId, "USER_CREATED", "BackofficeUser", 
-                user.Id.ToString(), new { Username = request.Username, Role = request.Role });
-
-            logger.LogInformation("Backoffice user created: {Username}", request.Username);
-            return TypedResults.Created($"/api/v1/admin/users/{user.Id}", user);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error creating user: {Username}", request.Username);
-            return Results.Problem("Internal Server Error", statusCode: 500);
-        }
-    }
-
-    private static async Task<IResult> GetBackofficeUsers(
-        CasinoDbContext context,
-        Guid? operatorId = null)
-    {
-        var query = context.BackofficeUsers.Include(u => u.Operator).AsNoTracking();
-        
-        if (operatorId.HasValue)
-            query = query.Where(u => u.OperatorId == operatorId.Value);
-
-        var users = await query.Select(u => new
-        {
-            u.Id,
-            u.Username,
-            u.Role,
-            u.Status,
-            u.CreatedAt,
-            Operator = u.Operator != null ? new { u.Operator.Id, u.Operator.Name } : null
-        }).ToListAsync();
-
-        return TypedResults.Ok(users);
-    }
+    // Remove duplicate DTOs - these are now handled by dedicated DTO classes:
+    // - CreateBackofficeUserRequest (now in Casino.Application.DTOs.Admin)
+    // - AdjustWalletRequest (now AdjustPlayerWalletRequest in Casino.Application.DTOs.Player)
 
     private static async Task<IResult> UpdateUserStatus(
         Guid id,
         [FromBody] UpdateUserStatusRequest request,
+        BrandContext brandContext,
         CasinoDbContext context,
         IAuditService auditService,
         ILogger<Program> logger)
@@ -141,39 +79,30 @@ public static class AdminEndpoints
         // TODO: Get current admin user ID from JWT/auth context
         var currentUserId = Guid.NewGuid(); // Placeholder
         await auditService.LogBackofficeActionAsync(currentUserId, "USER_STATUS_UPDATED", "BackofficeUser", 
-            user.Id.ToString(), new { OldStatus = oldStatus, NewStatus = request.Status });
+            user.Id.ToString(), new { OldStatus = oldStatus, NewStatus = request.Status, BrandCode = brandContext.BrandCode });
 
         return TypedResults.Ok(user);
-    }
-
-    private static async Task<IResult> GetPlayers(
-        CasinoDbContext context,
-        Guid? brandId = null)
-    {
-        var query = context.Players.Include(p => p.Brand).Include(p => p.Wallet).AsNoTracking();
-        
-        if (brandId.HasValue)
-            query = query.Where(p => p.BrandId == brandId.Value);
-
-        var players = await query.Select(p => new
-        {
-            p.Id,
-            p.Username,
-            p.Status,
-            Brand = new { p.Brand.Name, p.Brand.Code },
-            Balance = p.Wallet != null ? p.Wallet.BalanceBigint : 0
-        }).ToListAsync();
-
-        return TypedResults.Ok(players);
     }
 
     private static async Task<IResult> UpdatePlayerStatus(
         Guid id,
         [FromBody] UpdatePlayerStatusRequest request,
+        BrandContext brandContext,
         CasinoDbContext context,
         IAuditService auditService)
     {
-        var player = await context.Players.FindAsync(id);
+        if (!brandContext.IsResolved)
+        {
+            return Results.Problem(
+                title: "Brand Not Resolved",
+                detail: "Brand context is not available",
+                statusCode: 400);
+        }
+
+        // Ensure player belongs to current brand
+        var player = await context.Players.FirstOrDefaultAsync(p => 
+            p.Id == id && p.BrandId == brandContext.BrandId);
+        
         if (player == null)
             return Results.Problem("Player Not Found", statusCode: 404);
 
@@ -184,84 +113,38 @@ public static class AdminEndpoints
         // TODO: Get current admin user ID from JWT/auth context
         var currentUserId = Guid.NewGuid(); // Placeholder
         await auditService.LogBackofficeActionAsync(currentUserId, "PLAYER_STATUS_UPDATED", "Player", 
-            player.Id.ToString(), new { OldStatus = oldStatus, NewStatus = request.Status });
+            player.Id.ToString(), new { OldStatus = oldStatus, NewStatus = request.Status, BrandCode = brandContext.BrandCode });
 
         return TypedResults.Ok(player);
-    }
-
-    private static async Task<IResult> AdjustPlayerWallet(
-        Guid id,
-        [FromBody] AdjustWalletRequest request,
-        CasinoDbContext context,
-        IAuditService auditService)
-    {
-        using var transaction = await context.Database.BeginTransactionAsync();
-        
-        try
-        {
-            var player = await context.Players
-                .Include(p => p.Brand)
-                .Include(p => p.Wallet)
-                .FirstOrDefaultAsync(p => p.Id == id);
-
-            if (player?.Wallet == null)
-                return Results.Problem("Player or Wallet Not Found", statusCode: 404);
-
-            var oldBalance = player.Wallet.BalanceBigint;
-            var newBalance = player.Wallet.BalanceBigint + request.Amount;
-            if (newBalance < 0)
-                return Results.Problem("Invalid Adjustment", statusCode: 400);
-
-            player.Wallet.BalanceBigint = newBalance;
-
-            var ledgerEntry = new Ledger
-            {
-                OperatorId = player.Brand.OperatorId,
-                BrandId = player.BrandId,
-                PlayerId = player.Id,
-                DeltaBigint = request.Amount,
-                Reason = request.Amount > 0 ? LedgerReason.ADMIN_GRANT : LedgerReason.ADMIN_DEBIT,
-                ExternalRef = $"ADMIN_ADJUST_{Guid.NewGuid()}",
-                CreatedAt = DateTime.UtcNow
-            };
-
-            context.Ledger.Add(ledgerEntry);
-            await context.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            // TODO: Get current admin user ID from JWT/auth context
-            var currentUserId = Guid.NewGuid(); // Placeholder
-            await auditService.LogBackofficeActionAsync(currentUserId, "WALLET_ADJUSTED", "Player", 
-                player.Id.ToString(), new { 
-                    Amount = request.Amount, 
-                    OldBalance = oldBalance, 
-                    NewBalance = newBalance,
-                    Reason = request.Reason,
-                    Notes = request.Notes 
-                });
-
-            return TypedResults.Ok(new { Success = true, NewBalance = newBalance });
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            return Results.Problem("Internal Server Error", statusCode: 500);
-        }
     }
 
     private static async Task<IResult> AssignPlayerToCashier(
         Guid cashierId,
         Guid playerId,
+        BrandContext brandContext,
         CasinoDbContext context,
         IAuditService auditService)
     {
+        if (!brandContext.IsResolved)
+        {
+            return Results.Problem(
+                title: "Brand Not Resolved",
+                detail: "Brand context is not available",
+                statusCode: 400);
+        }
+
         var cashier = await context.BackofficeUsers
-            .FirstOrDefaultAsync(u => u.Id == cashierId && u.Role == BackofficeUserRole.CASHIER);
+            .FirstOrDefaultAsync(u => u.Id == cashierId && 
+                                     u.Role == BackofficeUserRole.CASHIER &&
+                                     u.OperatorId == brandContext.OperatorId);
         
         if (cashier == null)
             return Results.Problem("Cashier Not Found", statusCode: 404);
 
-        var player = await context.Players.FindAsync(playerId);
+        // Ensure player belongs to current brand
+        var player = await context.Players.FirstOrDefaultAsync(p => 
+            p.Id == playerId && p.BrandId == brandContext.BrandId);
+        
         if (player == null)
             return Results.Problem("Player Not Found", statusCode: 404);
 
@@ -285,19 +168,30 @@ public static class AdminEndpoints
         // TODO: Get current admin user ID from JWT/auth context
         var currentUserId = Guid.NewGuid(); // Placeholder
         await auditService.LogBackofficeActionAsync(currentUserId, "PLAYER_ASSIGNED_TO_CASHIER", "CashierPlayer", 
-            $"{cashierId}|{playerId}", new { CashierId = cashierId, PlayerId = playerId });
+            $"{cashierId}|{playerId}", new { CashierId = cashierId, PlayerId = playerId, BrandCode = brandContext.BrandCode });
 
         return TypedResults.Created($"/api/v1/admin/cashiers/{cashierId}/players", assignment);
     }
 
     private static async Task<IResult> GetCashierPlayers(
         Guid cashierId,
+        BrandContext brandContext,
         CasinoDbContext context)
     {
+        if (!brandContext.IsResolved)
+        {
+            return Results.Problem(
+                title: "Brand Not Resolved",
+                detail: "Brand context is not available",
+                statusCode: 400);
+        }
+
+        // Get players assigned to cashier that belong to current brand
         var players = await context.CashierPlayers
             .Where(cp => cp.CashierId == cashierId)
             .Include(cp => cp.Player.Brand)
             .Include(cp => cp.Player.Wallet)
+            .Where(cp => cp.Player.BrandId == brandContext.BrandId)
             .Select(cp => new
             {
                 cp.Player.Id,
@@ -315,11 +209,24 @@ public static class AdminEndpoints
     private static async Task<IResult> UnassignPlayerFromCashier(
         Guid cashierId,
         Guid playerId,
+        BrandContext brandContext,
         CasinoDbContext context,
         IAuditService auditService)
     {
+        if (!brandContext.IsResolved)
+        {
+            return Results.Problem(
+                title: "Brand Not Resolved",
+                detail: "Brand context is not available",
+                statusCode: 400);
+        }
+
+        // Ensure player belongs to current brand
         var assignment = await context.CashierPlayers
-            .FirstOrDefaultAsync(cp => cp.CashierId == cashierId && cp.PlayerId == playerId);
+            .Include(cp => cp.Player)
+            .FirstOrDefaultAsync(cp => cp.CashierId == cashierId && 
+                                      cp.PlayerId == playerId &&
+                                      cp.Player.BrandId == brandContext.BrandId);
         
         if (assignment == null)
             return Results.Problem("Assignment Not Found", statusCode: 404);
@@ -330,12 +237,13 @@ public static class AdminEndpoints
         // TODO: Get current admin user ID from JWT/auth context
         var currentUserId = Guid.NewGuid(); // Placeholder
         await auditService.LogBackofficeActionAsync(currentUserId, "PLAYER_UNASSIGNED_FROM_CASHIER", "CashierPlayer", 
-            $"{cashierId}|{playerId}", new { CashierId = cashierId, PlayerId = playerId });
+            $"{cashierId}|{playerId}", new { CashierId = cashierId, PlayerId = playerId, BrandCode = brandContext.BrandCode });
 
         return TypedResults.Ok(new { Success = true, Message = "Player unassigned successfully" });
     }
 
     private static async Task<IResult> GetBackofficeAudit(
+        BrandContext brandContext,
         CasinoDbContext context,
         Guid? userId = null,
         string? action = null,
@@ -345,6 +253,12 @@ public static class AdminEndpoints
         var query = context.BackofficeAudits
             .Include(a => a.User)
             .AsNoTracking();
+
+        // Filter by brand's operator if brand context is available
+        if (brandContext.IsResolved)
+        {
+            query = query.Where(a => a.User.OperatorId == brandContext.OperatorId);
+        }
 
         if (userId.HasValue)
             query = query.Where(a => a.UserId == userId.Value);
@@ -375,11 +289,13 @@ public static class AdminEndpoints
             Page = page,
             PageSize = pageSize,
             TotalCount = totalCount,
-            TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+            TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize),
+            BrandCode = brandContext.BrandCode
         });
     }
 
     private static async Task<IResult> GetProviderAudit(
+        BrandContext brandContext,
         CasinoDbContext context,
         string? provider = null,
         string? action = null,
@@ -411,7 +327,8 @@ public static class AdminEndpoints
             Page = page,
             PageSize = pageSize,
             TotalCount = totalCount,
-            TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+            TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize),
+            BrandCode = brandContext.BrandCode
         });
     }
 }

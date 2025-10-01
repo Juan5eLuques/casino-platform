@@ -1,5 +1,6 @@
 using Casino.Application.DTOs.Game;
 using Casino.Application.Services;
+using Casino.Application.Services.Models;
 using Casino.Domain.Entities;
 using Casino.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -189,7 +190,7 @@ public class GameService : IGameService
         return true;
     }
 
-    public async Task<IEnumerable<GetBrandGameResponse>> GetBrandGamesAsync(Guid brandId, bool? enabled = null)
+    public async Task<IEnumerable<GetBrandGameResult>> GetBrandGamesAsync(Guid brandId, bool? enabled = null)
     {
         var query = _context.BrandGames
             .Include(bg => bg.Game)
@@ -204,8 +205,7 @@ public class GameService : IGameService
             .ThenBy(bg => bg.Game.Name)
             .ToListAsync();
 
-        return brandGames.Select(bg => new GetBrandGameResponse(
-            bg.BrandId,
+        return brandGames.Select(bg => new GetBrandGameResult(
             bg.GameId,
             bg.Game.Code,
             bg.Game.Name,

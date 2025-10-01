@@ -1,5 +1,7 @@
 using Casino.Application.DTOs.Game;
 using Casino.Application.Services;
+using Casino.Application.Services.Models;
+using Casino.Application.Mappers;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Casino.Api.Endpoints;
@@ -59,7 +61,7 @@ public static class GameEndpoints
             .Produces(404);
 
         catalogGroup.MapGet("/brands/{brandId:guid}/games", GetBrandGames)
-            .WithName("AdminGetBrandGames")
+            .WithName("GetBrandGames")
             .WithSummary("Get games assigned to brand")
             .Produces<IEnumerable<GetBrandGameResponse>>();
 
@@ -102,6 +104,7 @@ public static class GameEndpoints
 
     private static async Task<IResult> GetGames(
         IGameService gameService,
+        ILogger<Program> logger,
         bool? enabled = null)
     {
         try
@@ -111,6 +114,7 @@ public static class GameEndpoints
         }
         catch (Exception ex)
         {
+            logger.LogError(ex, "Error getting games");
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "An error occurred while getting games",
@@ -120,7 +124,8 @@ public static class GameEndpoints
 
     private static async Task<IResult> GetGame(
         Guid gameId,
-        IGameService gameService)
+        IGameService gameService,
+        ILogger<Program> logger)
     {
         try
         {
@@ -138,6 +143,7 @@ public static class GameEndpoints
         }
         catch (Exception ex)
         {
+            logger.LogError(ex, "Error getting game: {GameId}", gameId);
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "An error occurred while getting game",
@@ -292,15 +298,29 @@ public static class GameEndpoints
     private static async Task<IResult> GetBrandGames(
         Guid brandId,
         IGameService gameService,
+        ILogger<Program> logger,
         bool? enabled = null)
     {
         try
         {
-            var games = await gameService.GetBrandGamesAsync(brandId, enabled);
+            var gamesResult = await gameService.GetBrandGamesAsync(brandId, enabled);
+            
+            // Mapear a DTOs incluyendo el BrandId correcto
+            var games = gamesResult.Select(g => new GetBrandGameResponse(
+                brandId,
+                g.GameId,
+                g.Code,
+                g.Name,
+                g.Provider,
+                g.Enabled,
+                g.DisplayOrder,
+                g.Tags));
+            
             return TypedResults.Ok(games);
         }
         catch (Exception ex)
         {
+            logger.LogError(ex, "Error getting brand games: {BrandId}", brandId);
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "An error occurred while getting brand games",

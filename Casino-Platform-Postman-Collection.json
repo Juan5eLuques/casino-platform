@@ -1,0 +1,310 @@
+{
+  "info": {
+    "name": "Casino Platform API",
+    "description": "Complete API collection for Casino Platform with JWT authentication",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Admin Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Host",
+                "value": "admin.bet30test.netlify.app"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"superadmin\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "login"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Host",
+                "value": "admin.bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "me"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Host",
+                "value": "admin.bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "logout"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Player Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Host",
+                "value": "bet30test.netlify.app"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"player1_bet30\",\n  \"password\": \"demo\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Player Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{playerToken}}"
+              },
+              {
+                "key": "Host",
+                "value": "bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "me"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin - Brand Management",
+      "item": [
+        {
+          "name": "Get Brands",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Host",
+                "value": "admin.bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/brands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "brands"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Host",
+                "value": "admin.bet30test.netlify.app"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"testbrand\",\n  \"name\": \"Test Brand\",\n  \"domain\": \"testbrand.local\",\n  \"operatorId\": \"{{operatorId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/brands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "brands"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin - Player Management",
+      "item": [
+        {
+          "name": "Get Players",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Host",
+                "value": "admin.bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/players",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "players"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Public - Catalog",
+      "item": [
+        {
+          "name": "Get Games",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Host",
+                "value": "bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/catalog/games",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "catalog", "games"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Security Tests",
+      "item": [
+        {
+          "name": "Test Cross-Realm (Player token on Admin endpoint)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{playerToken}}"
+              },
+              {
+                "key": "Host",
+                "value": "admin.bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/brands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "brands"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Test Cross-Realm (Admin token on Player endpoint)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Host",
+                "value": "bet30test.netlify.app"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "me"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "playerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "operatorId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

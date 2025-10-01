@@ -1,4 +1,5 @@
 using Casino.Application.DTOs.Game;
+using Casino.Application.Services.Models;
 
 namespace Casino.Application.Services;
 
@@ -13,6 +14,6 @@ public interface IGameService
     // Brand-Game management
     Task<bool> AssignGameToBrandAsync(AssignGameToBrandRequest request);
     Task<bool> UnassignGameFromBrandAsync(Guid brandId, Guid gameId);
-    Task<IEnumerable<GetBrandGameResponse>> GetBrandGamesAsync(Guid brandId, bool? enabled = null);
+    Task<IEnumerable<GetBrandGameResult>> GetBrandGamesAsync(Guid brandId, bool? enabled = null);
     Task<bool> UpdateBrandGameAsync(UpdateBrandGameRequest request);
 }

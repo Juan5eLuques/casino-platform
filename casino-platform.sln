@@ -20,12 +20,17 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Casino.Infrastructure", "ap
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 	ProjectSection(SolutionItems) = preProject
+		API-DESIGN-GUIDE.md = API-DESIGN-GUIDE.md
 		..\..\..\Downloads\casino_docs_md\docs\API-GATEWAY.md = ..\..\..\Downloads\casino_docs_md\docs\API-GATEWAY.md
 		..\..\..\Downloads\casino_docs_md\docs\ARCHITECTURE.md = ..\..\..\Downloads\casino_docs_md\docs\ARCHITECTURE.md
+		AUTH-DESIGN.md = AUTH-DESIGN.md
+		BRAND-CONFIG-MODEL.md = BRAND-CONFIG-MODEL.md
+		BRANDS-API.md = BRANDS-API.md
 		..\..\..\Downloads\casino_docs_md\docs\DATA-MODEL.md = ..\..\..\Downloads\casino_docs_md\docs\DATA-MODEL.md
 		..\..\..\Downloads\casino_docs_md\docs\INTEGRATION-KIT.md = ..\..\..\Downloads\casino_docs_md\docs\INTEGRATION-KIT.md
 		..\..\..\Downloads\casino_docs_md\docs\PROMPTS.md = ..\..\..\Downloads\casino_docs_md\docs\PROMPTS.md
 		..\..\..\Downloads\casino_docs_md\docs\ROADMAP.md = ..\..\..\Downloads\casino_docs_md\docs\ROADMAP.md
+		..\..\..\Downloads\ROUTES-CLEANUP.md = ..\..\..\Downloads\ROUTES-CLEANUP.md
 		TENANCY.md = TENANCY.md
 	EndProjectSection
 EndProject

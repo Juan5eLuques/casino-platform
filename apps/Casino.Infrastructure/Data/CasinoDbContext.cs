@@ -25,6 +25,7 @@ public class CasinoDbContext : DbContext
     public DbSet<CashierPlayer> CashierPlayers { get; set; }
     public DbSet<BackofficeAudit> BackofficeAudits { get; set; }
     public DbSet<ProviderAudit> ProviderAudits { get; set; }
+    public DbSet<BrandProviderConfig> BrandProviderConfigs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -42,13 +43,28 @@ public class CasinoDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Code).IsUnique();
+            entity.HasIndex(e => e.Domain).IsUnique().HasFilter("\"Domain\" IS NOT NULL");
+            entity.HasIndex(e => e.AdminDomain).IsUnique().HasFilter("\"AdminDomain\" IS NOT NULL");
             entity.Property(e => e.Code).IsRequired().HasMaxLength(50);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Locale).IsRequired().HasMaxLength(10);
+            entity.Property(e => e.Domain).HasMaxLength(255);
+            entity.Property(e => e.AdminDomain).HasMaxLength(255);
+            entity.Property(e => e.CorsOrigins)
+                .HasConversion(
+                    v => string.Join(',', v),
+                    v => v.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                .Metadata.SetValueComparer(new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<string[]>(
+                    (c1, c2) => c1!.SequenceEqual(c2!),
+                    c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToArray()));
             entity.Property(e => e.Theme)
+                .HasColumnType("jsonb");
+            entity.Property(e => e.Settings)
                 .HasColumnType("jsonb");
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             
             entity.HasOne(e => e.Operator)
                 .WithMany(o => o.Brands)
@@ -183,6 +199,7 @@ public class CasinoDbContext : DbContext
             entity.Property(e => e.Role).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.LastLoginAt); // Nullable DateTime
             
             entity.HasOne(e => e.Operator)
                 .WithMany(o => o.BackofficeUsers)
@@ -230,6 +247,22 @@ public class CasinoDbContext : DbContext
             entity.Property(e => e.ResponseData)
                 .HasColumnType("jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+
+        // BrandProviderConfig configuration
+        modelBuilder.Entity<BrandProviderConfig>(entity =>
+        {
+            entity.HasKey(e => new { e.BrandId, e.ProviderCode });
+            entity.Property(e => e.ProviderCode).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Secret).IsRequired().HasMaxLength(500);
+            entity.Property(e => e.Meta)
+                .HasColumnType("jsonb");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            
+            entity.HasOne(e => e.Brand)
+                .WithMany(b => b.ProviderConfigs)
+                .HasForeignKey(e => e.BrandId);
         });
     }
 }
