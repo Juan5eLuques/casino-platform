@@ -29,6 +29,16 @@ public class BrandService : IBrandService
     {
         _logger.LogInformation("Creating brand with code: {Code}", request.Code);
 
+        // Validate required fields first
+        if (string.IsNullOrWhiteSpace(request.Code))
+            throw new ArgumentException("Brand code is required");
+        
+        if (string.IsNullOrWhiteSpace(request.Name))
+            throw new ArgumentException("Brand name is required");
+        
+        if (string.IsNullOrWhiteSpace(request.Locale))
+            throw new ArgumentException("Brand locale is required");
+
         // Check for duplicates
         var existingCode = await _context.Brands.AsNoTracking()
             .AnyAsync(b => b.Code == request.Code);
@@ -51,13 +61,9 @@ public class BrandService : IBrandService
                 throw new InvalidOperationException($"Brand with admin domain '{request.AdminDomain}' already exists");
         }
 
-        // Get operator (for OPERATOR_ADMIN validation this should be done in the controller)
-        var operatorId = await GetOperatorIdFromContext() ?? throw new InvalidOperationException("Operator context required");
-
         var brand = new Brand
         {
             Id = Guid.NewGuid(),
-            OperatorId = operatorId,
             Code = request.Code,
             Name = request.Name,
             Locale = request.Locale,
@@ -82,20 +88,15 @@ public class BrandService : IBrandService
         return await GetBrandResponseAsync(brand);
     }
 
-    public async Task<QueryBrandsResponse> GetBrandsAsync(QueryBrandsRequest request, Guid? operatorScope = null)
+    public async Task<QueryBrandsResponse> GetBrandsAsync(QueryBrandsRequest request, Guid? brandScope = null)
     {
-        var query = _context.Brands
-            .Include(b => b.Operator)
-            .AsNoTracking();
+        var query = _context.Brands.AsNoTracking();
 
-        // Apply operator scope
-        if (operatorScope.HasValue)
-            query = query.Where(b => b.OperatorId == operatorScope.Value);
+        // Apply brand scope
+        if (brandScope.HasValue)
+            query = query.Where(b => b.Id == brandScope.Value);
 
         // Apply filters
-        if (request.OperatorId.HasValue)
-            query = query.Where(b => b.OperatorId == request.OperatorId.Value);
-
         if (request.Status.HasValue)
             query = query.Where(b => b.Status == request.Status.Value);
 
@@ -128,23 +129,21 @@ public class BrandService : IBrandService
         return new QueryBrandsResponse(brands, request.Page, request.PageSize, totalCount, totalPages);
     }
 
-    public async Task<GetBrandResponse?> GetBrandAsync(Guid brandId, Guid? operatorScope = null)
+    public async Task<GetBrandResponse?> GetBrandAsync(Guid brandId, Guid? brandScope = null)
     {
-        var query = _context.Brands
-            .Include(b => b.Operator)
-            .AsNoTracking();
+        var query = _context.Brands.AsNoTracking();
 
-        if (operatorScope.HasValue)
-            query = query.Where(b => b.OperatorId == operatorScope.Value);
+        if (brandScope.HasValue)
+            query = query.Where(b => b.Id == brandScope.Value);
 
         var brand = await query.FirstOrDefaultAsync(b => b.Id == brandId);
         
         return brand != null ? await GetBrandResponseAsync(brand) : null;
     }
 
-    public async Task<GetBrandResponse> UpdateBrandAsync(Guid brandId, UpdateBrandRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<GetBrandResponse> UpdateBrandAsync(Guid brandId, UpdateBrandRequest request, Guid currentUserId, Guid? brandScope = null)
     {
-        var brand = await GetBrandForUpdateAsync(brandId, operatorScope);
+        var brand = await GetBrandForUpdateAsync(brandId, brandScope);
         
         var oldValues = new { brand.Name, brand.Locale, brand.Domain, brand.AdminDomain, brand.CorsOrigins };
         bool invalidateCache = false;
@@ -194,9 +193,9 @@ public class BrandService : IBrandService
         return await GetBrandResponseAsync(brand);
     }
 
-    public async Task<bool> DeleteBrandAsync(Guid brandId, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<bool> DeleteBrandAsync(Guid brandId, Guid currentUserId, Guid? brandScope = null)
     {
-        var brand = await GetBrandForUpdateAsync(brandId, operatorScope);
+        var brand = await GetBrandForUpdateAsync(brandId, brandScope);
 
         // Check if brand has active players or sessions
         var hasActivePlayers = await _context.Players.AnyAsync(p => p.BrandId == brandId && p.Status == PlayerStatus.ACTIVE);
@@ -220,9 +219,9 @@ public class BrandService : IBrandService
         return true;
     }
 
-    public async Task<GetBrandResponse> UpdateBrandStatusAsync(Guid brandId, UpdateBrandStatusRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<GetBrandResponse> UpdateBrandStatusAsync(Guid brandId, UpdateBrandStatusRequest request, Guid currentUserId, Guid? brandScope = null)
     {
-        var brand = await GetBrandForUpdateAsync(brandId, operatorScope);
+        var brand = await GetBrandForUpdateAsync(brandId, brandScope);
         
         var oldStatus = brand.Status;
         brand.Status = request.Status;
@@ -238,12 +237,12 @@ public class BrandService : IBrandService
         return await GetBrandResponseAsync(brand);
     }
 
-    public async Task<Dictionary<string, object>?> GetBrandSettingsAsync(Guid brandId, Guid? operatorScope = null)
+    public async Task<Dictionary<string, object>?> GetBrandSettingsAsync(Guid brandId, Guid? brandScope = null)
     {
         var query = _context.Brands.AsNoTracking();
 
-        if (operatorScope.HasValue)
-            query = query.Where(b => b.OperatorId == operatorScope.Value);
+        if (brandScope.HasValue)
+            query = query.Where(b => b.Id == brandScope.Value);
 
         var brand = await query.FirstOrDefaultAsync(b => b.Id == brandId);
         if (brand == null) return null;
@@ -253,9 +252,9 @@ public class BrandService : IBrandService
         return JsonSerializer.Deserialize<Dictionary<string, object>>(brand.Settings.RootElement.GetRawText()) ?? new Dictionary<string, object>();
     }
 
-    public async Task<Dictionary<string, object>> UpdateBrandSettingsAsync(Guid brandId, UpdateBrandSettingsRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<Dictionary<string, object>> UpdateBrandSettingsAsync(Guid brandId, UpdateBrandSettingsRequest request, Guid currentUserId, Guid? brandScope = null)
     {
-        var brand = await GetBrandForUpdateAsync(brandId, operatorScope);
+        var brand = await GetBrandForUpdateAsync(brandId, brandScope);
 
         var oldSettings = brand.Settings;
         brand.Settings = request.Settings;
@@ -271,9 +270,9 @@ public class BrandService : IBrandService
         return JsonSerializer.Deserialize<Dictionary<string, object>>(request.Settings.RootElement.GetRawText()) ?? new Dictionary<string, object>();
     }
 
-    public async Task<Dictionary<string, object>> PatchBrandSettingsAsync(Guid brandId, PatchBrandSettingsRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<Dictionary<string, object>> PatchBrandSettingsAsync(Guid brandId, PatchBrandSettingsRequest request, Guid currentUserId, Guid? brandScope = null)
     {
-        var brand = await GetBrandForUpdateAsync(brandId, operatorScope);
+        var brand = await GetBrandForUpdateAsync(brandId, brandScope);
 
         var currentSettings = brand.Settings != null 
             ? JsonSerializer.Deserialize<Dictionary<string, object>>(brand.Settings.RootElement.GetRawText()) ?? new Dictionary<string, object>()
@@ -300,10 +299,10 @@ public class BrandService : IBrandService
         return currentSettings;
     }
 
-    public async Task<GetBrandProvidersResponse> GetBrandProvidersAsync(Guid brandId, Guid? operatorScope = null)
+    public async Task<GetBrandProvidersResponse> GetBrandProvidersAsync(Guid brandId, Guid? brandScope = null)
     {
         // Verify brand access
-        await GetBrandAsync(brandId, operatorScope);
+        await GetBrandAsync(brandId, brandScope);
 
         var providers = await _context.BrandProviderConfigs
             .Where(c => c.BrandId == brandId)
@@ -320,10 +319,10 @@ public class BrandService : IBrandService
         return new GetBrandProvidersResponse(providers);
     }
 
-    public async Task<GetProviderConfigResponse> UpsertProviderConfigAsync(Guid brandId, string providerCode, UpsertProviderConfigRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<GetProviderConfigResponse> UpsertProviderConfigAsync(Guid brandId, string providerCode, UpsertProviderConfigRequest request, Guid currentUserId, Guid? brandScope = null)
     {
         // Verify brand access
-        await GetBrandAsync(brandId, operatorScope);
+        await GetBrandAsync(brandId, brandScope);
 
         var config = await _context.BrandProviderConfigs
             .FirstOrDefaultAsync(c => c.BrandId == brandId && c.ProviderCode == providerCode);
@@ -362,10 +361,10 @@ public class BrandService : IBrandService
             true);
     }
 
-    public async Task<RotateSecretResponse> RotateProviderSecretAsync(Guid brandId, string providerCode, RotateProviderSecretRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<RotateSecretResponse> RotateProviderSecretAsync(Guid brandId, string providerCode, RotateProviderSecretRequest request, Guid currentUserId, Guid? brandScope = null)
     {
         // Verify brand access
-        await GetBrandAsync(brandId, operatorScope);
+        await GetBrandAsync(brandId, brandScope);
 
         var config = await _context.BrandProviderConfigs
             .FirstOrDefaultAsync(c => c.BrandId == brandId && c.ProviderCode == providerCode);
@@ -392,7 +391,6 @@ public class BrandService : IBrandService
     public async Task<GetBrandResponse?> GetBrandByHostAsync(string host)
     {
         var brand = await _context.Brands
-            .Include(b => b.Operator)
             .AsNoTracking()
             .FirstOrDefaultAsync(b => 
                 (b.Domain != null && b.Domain.ToLower() == host.ToLower()) ||
@@ -401,10 +399,10 @@ public class BrandService : IBrandService
         return brand != null ? await GetBrandResponseAsync(brand) : null;
     }
 
-    public async Task<IEnumerable<GetBrandGameResult>> GetBrandCatalogAsync(Guid brandId, Guid? operatorScope = null)
+    public async Task<IEnumerable<GetBrandGameResult>> GetBrandCatalogAsync(Guid brandId, Guid? brandScope = null)
     {
         // Verify brand access
-        await GetBrandAsync(brandId, operatorScope);
+        await GetBrandAsync(brandId, brandScope);
 
         var games = await _context.BrandGames
             .Include(bg => bg.Game)
@@ -434,12 +432,12 @@ public class BrandService : IBrandService
     }
 
     // Private helper methods
-    private async Task<Brand> GetBrandForUpdateAsync(Guid brandId, Guid? operatorScope)
+    private async Task<Brand> GetBrandForUpdateAsync(Guid brandId, Guid? brandScope)
     {
         var query = _context.Brands.Where(b => b.Id == brandId);
 
-        if (operatorScope.HasValue)
-            query = query.Where(b => b.OperatorId == operatorScope.Value);
+        if (brandScope.HasValue)
+            query = query.Where(b => b.Id == brandScope.Value);
 
         var brand = await query.FirstOrDefaultAsync();
         if (brand == null)
@@ -452,7 +450,7 @@ public class BrandService : IBrandService
     {
         return new GetBrandResponse(
             brand.Id,
-            brand.OperatorId,
+            null, // OperatorId removed
             brand.Code,
             brand.Name,
             brand.Locale,
@@ -464,7 +462,7 @@ public class BrandService : IBrandService
             brand.Status,
             brand.CreatedAt,
             brand.UpdatedAt,
-            brand.Operator != null ? new OperatorInfo(brand.Operator.Id, brand.Operator.Name) : null);
+            null); // Operator removed
     }
 
     private async Task ValidateUniqueDomainAsync(string domain, Guid excludeBrandId)
@@ -481,13 +479,6 @@ public class BrandService : IBrandService
             .AnyAsync(b => b.AdminDomain == adminDomain && b.Id != excludeBrandId);
         if (exists)
             throw new InvalidOperationException($"Admin domain '{adminDomain}' is already in use");
-    }
-
-    private Task<Guid?> GetOperatorIdFromContext()
-    {
-        // This should be injected from the current user context
-        // For now, return a placeholder - this should be implemented based on your auth system
-        return Task.FromResult((Guid?)null);
     }
 
     private static string GenerateSecretKey(int length)

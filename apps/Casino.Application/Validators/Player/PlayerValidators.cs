@@ -8,9 +8,8 @@ public class CreatePlayerRequestValidator : AbstractValidator<CreatePlayerReques
 {
     public CreatePlayerRequestValidator()
     {
-        RuleFor(x => x.BrandId)
-            .NotEmpty()
-            .WithMessage("BrandId is required");
+        // NOTA: Removida validación de BrandId requerido - ahora se resuelve automáticamente en el endpoint
+        // El endpoint valida que BrandId esté presente después de resolver automáticamente desde brandContext
 
         RuleFor(x => x.Username)
             .NotEmpty()

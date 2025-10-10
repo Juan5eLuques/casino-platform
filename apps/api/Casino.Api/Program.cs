@@ -1,19 +1,30 @@
-using Casino.Api.Endpoints;
+﻿using Casino.Api.Endpoints;
 using Casino.Api.Filters;
 using Casino.Api.Middleware;
 using Casino.Application.Services;
 using Casino.Application.Services.Implementations;
 using Casino.Application.Validators;
+using Casino.Application.DTOs.Wallet;
 using Casino.Infrastructure.Data;
 using FluentValidation;
+using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json.Serialization;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure JSON options for enum handling
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    options.SerializerOptions.PropertyNameCaseInsensitive = true;
+});
 
 // Add services to the container
 builder.Services.AddDbContext<CasinoDbContext>(options =>
@@ -22,8 +33,7 @@ builder.Services.AddDbContext<CasinoDbContext>(options =>
 // Register brand context as scoped service
 builder.Services.AddScoped<BrandContext>();
 
-// Register application services
-builder.Services.AddScoped<IWalletService, WalletService>();
+// Register application services - CLEAN VERSION
 builder.Services.AddScoped<ISessionService, SessionService>();
 builder.Services.AddScoped<IRoundService, RoundService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
@@ -33,13 +43,27 @@ builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 
 // Register new services for missing endpoints
-builder.Services.AddScoped<IOperatorService, OperatorService>();
 builder.Services.AddScoped<IBackofficeUserService, BackofficeUserService>();
 builder.Services.AddScoped<IPlayerService, PlayerService>();
 builder.Services.AddScoped<IBrandGameService, BrandGameService>();
+builder.Services.AddScoped<ICashierPlayerService, CashierPlayerService>();
 
-// Register validators
-builder.Services.AddValidatorsFromAssemblyContaining<DebitRequestValidator>();
+// SONNET: Unified user service - RESTAURA funcionalidad original de /users
+builder.Services.AddScoped<IUnifiedUserService, UnifiedUserService>();
+
+// SONNET: Wallet services - CLEAN SEPARATION
+// Simple wallet service (SIMPLE+ version with guarantees) for admin operations
+builder.Services.AddScoped<ISimpleWalletService, SimpleWalletService>();
+// Legacy wallet service for gateway compatibility (uses bigint system)
+builder.Services.AddScoped<ILegacyWalletService, LegacyWalletService>();
+
+// SONNET: FluentValidation - REGISTER ALL VALIDATORS BY ASSEMBLY
+// This replaces individual AddScoped<IValidator<...>> registrations
+builder.Services.AddValidatorsFromAssembly(typeof(CreateTransactionRequestValidator).Assembly); // Application assembly
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly); // API assembly (if any validators here)
+
+// SONNET: Enable FluentValidation auto-validation for Minimal APIs
+builder.Services.AddFluentValidationAutoValidation();
 
 // Register filters
 builder.Services.AddScoped<HmacEndpointFilter>();
@@ -70,15 +94,34 @@ builder.Services.AddAuthentication()
         {
             OnMessageReceived = context =>
             {
-                // Check Authorization header first
-                var auth = context.Request.Headers["Authorization"].ToString();
-                if (!string.IsNullOrEmpty(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                // 1) Leer desde Authorization: Bearer header primero
+                var auth = context.Request.Headers.Authorization.ToString();
+                if (!string.IsNullOrWhiteSpace(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Token = auth.Substring("Bearer ".Length).Trim();
                     return Task.CompletedTask;
+                }
+                
+                // 2) Fallback: leer desde cookie bk.token
+                if (context.Request.Cookies.TryGetValue("bk.token", out var cookieToken))
+                {
+                    context.Token = cookieToken;
+                }
 
-                // Fallback to cookie
-                if (context.Request.Cookies.TryGetValue("bk.token", out var token))
-                    context.Token = token;
-
+                return Task.CompletedTask;
+            },
+            OnAuthenticationFailed = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogError("🚨 JWT Authentication FAILED: {Error}", context.Exception.Message);
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                var user = context.Principal?.Identity?.Name;
+                var role = context.Principal?.FindFirst(ClaimTypes.Role)?.Value;
+                logger.LogInformation("✅ JWT Token VALIDATED - User: {User}, Role: {Role}", user, role);
                 return Task.CompletedTask;
             }
         };
@@ -119,18 +162,51 @@ builder.Services.AddAuthentication()
 // Configure Authorization Policies
 builder.Services.AddAuthorization(options =>
 {
+    // Política básica para backoffice (mantener compatibilidad)
     options.AddPolicy("BackofficePolicy", policy =>
         policy.RequireAuthenticatedUser()
               .AddAuthenticationSchemes("BackofficeJwt")
-              .RequireClaim(ClaimTypes.Role, "SUPER_ADMIN", "OPERATOR_ADMIN", "CASHIER"));
+              .RequireClaim(ClaimTypes.Role, "SUPER_ADMIN", "BRAND_ADMIN", "CASHIER"));
 
+    // Política básica para players (mantener compatibilidad)
     options.AddPolicy("PlayerPolicy", policy =>
         policy.RequireAuthenticatedUser()
               .AddAuthenticationSchemes("PlayerJwt")
               .RequireClaim(ClaimTypes.Role, "PLAYER"));
+
+    // === NUEVAS POLÍTICAS PARA BRAND-ONLY SYSTEM ===
+
+    // Solo SUPER_ADMIN (acceso global)
+    options.AddPolicy("SuperAdminOnly", policy =>
+        policy.RequireAuthenticatedUser()
+              .AddAuthenticationSchemes("BackofficeJwt")
+              .RequireClaim(ClaimTypes.Role, "SUPER_ADMIN"));
+
+    // BRAND_ADMIN con scope a su brand (requiere brand context válido)
+    options.AddPolicy("BrandScopedAdmin", policy =>
+        policy.RequireAuthenticatedUser()
+              .AddAuthenticationSchemes("BackofficeJwt")
+              .RequireClaim(ClaimTypes.Role, "BRAND_ADMIN"));
+
+    // BRAND_ADMIN o CASHIER con scope a su brand
+    options.AddPolicy("BrandScopedCashierOrAdmin", policy =>
+        policy.RequireAuthenticatedUser()
+              .AddAuthenticationSchemes("BackofficeJwt")
+              .RequireClaim(ClaimTypes.Role, "BRAND_ADMIN", "CASHIER"));
+
+    // SUPER_ADMIN o BRAND_ADMIN (con diferentes niveles de acceso)
+    options.AddPolicy("AdminOrSuperAdmin", policy =>
+        policy.RequireAuthenticatedUser()
+              .AddAuthenticationSchemes("BackofficeJwt")
+              .RequireClaim(ClaimTypes.Role, "SUPER_ADMIN", "BRAND_ADMIN"));
+
+    // NUEVA: Política inclusiva para cualquier usuario autenticado de backoffice
+    options.AddPolicy("AnyBackofficeUser", policy =>
+        policy.RequireAuthenticatedUser()
+              .AddAuthenticationSchemes("BackofficeJwt")
+              .RequireClaim(ClaimTypes.Role, "SUPER_ADMIN", "BRAND_ADMIN", "CASHIER"));
 });
 
-// Remove default CORS since we'll use dynamic CORS
 // Add health checks
 builder.Services.AddHealthChecks()
     .AddNpgSql(builder.Configuration.GetConnectionString("Default")!);
@@ -145,10 +221,10 @@ builder.Services.AddSwaggerGen(c =>
         Description = "B2B Casino Platform with virtual chips, multi-site support and JWT authentication"
     });
     
-    // Resolver colisiones de nombres en Swagger
+    // SONNET: Resolver colisiones de nombres en Swagger
     c.CustomSchemaIds(t => (t.FullName ?? t.Name).Replace('+', '.'));
     
-    // Resolver conflictos de rutas duplicadas (temporal mientras se limpia)
+    // SONNET: Resolver conflictos de rutas duplicadas
     c.ResolveConflictingActions(apiDescriptions =>
         apiDescriptions.OrderByDescending(d => d.SupportedResponseTypes.Count).First());
     
@@ -189,6 +265,7 @@ builder.Logging.AddDebug();
 
 var app = builder.Build();
 
+// SONNET: ORDEN CORRECTO DE MIDDLEWARES (verificado)
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
@@ -202,7 +279,21 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// Add authentication and authorization
+// SONNET: 1) UseForwardedHeaders
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | 
+                      Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto |
+                      Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
+});
+
+// SONNET: 2) BrandResolverMiddleware
+app.UseMiddleware<BrandResolverMiddleware>();
+
+// SONNET: 3) DynamicCorsMiddleware
+app.UseMiddleware<DynamicCorsMiddleware>();
+
+// SONNET: 4) Authentication y Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -232,74 +323,43 @@ app.Use(async (context, next) =>
     }
 });
 
-// Add brand resolver middleware (before endpoints)
-app.UseMiddleware<BrandResolverMiddleware>();
-
-// Add dynamic CORS middleware (after brand resolver)
-app.UseMiddleware<DynamicCorsMiddleware>();
-
-// Map health check endpoint
+// SONNET: Map health check endpoint
 app.MapHealthChecks("/health")
     .WithTags("Health")
     .WithName("HealthCheck");
 
-// Map authentication endpoints (unprotected)
+// SONNET: Map authentication endpoints (unprotected)
 app.MapAuthEndpoints();
 
-// Map protected API endpoints with authorization
+// === GATEWAY ENDPOINTS (UNPROTECTED) ===
+// SONNET: Mantener compatibilidad con providers externos usando LegacyWalletService
+app.MapGatewayEndpoints();
+
+// === INTERNAL WALLET ENDPOINTS (UNPROTECTED) ===
+// SONNET: Endpoints internos para compatibilidad con gateway usando LegacyWalletService
+app.MapInternalWalletEndpoints();
+
+// === SIMPLE WALLET SYSTEM (FUNCTIONAL) ===
+// SONNET: Sistema simple de transacciones con garantías críticas
+app.MapSimpleWalletEndpoints();
+
+// === WORKING CORE ENDPOINTS ===
+// SONNET: Map protected API endpoints with authorization - UN SOLO MAPGROUP por /api/v1/admin
 var adminGroup = app.MapGroup("/api/v1/admin")
-    .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = "BackofficeJwt", Policy = "BackofficePolicy" });
+    .RequireAuthorization("BackofficePolicy");
 
-var playerGroup = app.MapGroup("/api/v1/player")
-    .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = "PlayerJwt", Policy = "PlayerPolicy" });
-
-// Map existing endpoints to protected groups
-adminGroup.MapWalletEndpoints();
 adminGroup.MapSessionEndpoints();
 adminGroup.MapGameEndpoints();
-adminGroup.MapBrandAdminEndpoints();
-adminGroup.MapAdminEndpoints();
-
-// Map new endpoints for complete site creation
-adminGroup.MapOperatorEndpoints();
-adminGroup.MapBackofficeUserEndpoints();
-adminGroup.MapPlayerManagementEndpoints();
+adminGroup.MapAuditEndpoints();
 adminGroup.MapBrandGameEndpoints();
 
-// Map public endpoints (no auth required)
-app.MapGatewayEndpoints(); // HMAC protected, no JWT required
-app.MapCatalogEndpoints(); // Public catalog, brand-scoped
+// SONNET: UNIFIED USER ENDPOINTS - Restaura funcionalidad original de /users
+adminGroup.MapUnifiedUserEndpoints();
 
-// Basic hello world endpoint
-app.MapGet("/", (BrandContext brandContext) => new { 
-    Message = "Casino Platform API", 
-    Version = "1.0.0",
-    Environment = app.Environment.EnvironmentName,
-    Timestamp = DateTime.UtcNow,
-    Brand = brandContext.IsResolved ? new 
-    { 
-        brandContext.BrandId, 
-        brandContext.BrandCode, 
-        brandContext.Domain 
-    } : null
-})
-.WithTags("Info")
-.WithName("GetApiInfo");
+// SONNET: DEPRECATED - Endpoints específicos por tipo de usuario (comentados para evitar duplicación)
+// adminGroup.MapBrandOnlyBackofficeUserEndpoints();
+// adminGroup.MapBrandOnlyPlayerEndpoints();
 
-// Ensure database is created (for development)
-if (app.Environment.IsDevelopment())
-{
-    using var scope = app.Services.CreateScope();
-    var context = scope.ServiceProvider.GetRequiredService<CasinoDbContext>();
-    try
-    {
-        await context.Database.EnsureCreatedAsync();
-        app.Logger.LogInformation("Database ensured created successfully");
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "Error ensuring database is created");
-    }
-}
+adminGroup.MapPasswordEndpoints();
 
 app.Run();

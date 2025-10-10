@@ -11,43 +11,39 @@ public static class AdminEndpoints
 {
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/admin")
-            .WithTags("Admin");
-
         // NOTE: Removed duplicate endpoints - now handled by dedicated endpoint classes:
         // - BackofficeUserEndpoints handles /users routes
         // - PlayerManagementEndpoints handles /players routes  
-        // - OperatorEndpoints handles /operators routes
         // - BrandGameEndpoints handles /brands/{id}/games routes
         
         // Keeping only unique endpoints not covered by other endpoint classes:
 
         // User status updates (specific endpoint not covered elsewhere)
-        group.MapPatch("/users/{id:guid}/status", UpdateUserStatus)
+        app.MapPatch("/users/{id:guid}/status", UpdateUserStatus)
             .WithName("AdminUpdateUserStatus")
             .WithTags("Admin");
 
         // Player status updates (specific endpoint not covered elsewhere)  
-        group.MapPatch("/players/{id:guid}/status", UpdatePlayerStatus)
+        app.MapPatch("/players/{id:guid}/status", UpdatePlayerStatus)
             .WithName("AdminUpdatePlayerStatus")
             .WithTags("Admin");
 
         // Cashier Management (unique functionality)
-        group.MapPost("/cashiers/{cashierId:guid}/assign-player/{playerId:guid}", AssignPlayerToCashier)
+        app.MapPost("/cashiers/{cashierId:guid}/assign-player/{playerId:guid}", AssignPlayerToCashier)
             .WithName("AdminAssignPlayerToCashier")
             .WithTags("Admin");
-        group.MapGet("/cashiers/{cashierId:guid}/players", GetCashierPlayers)
+        app.MapGet("/cashiers/{cashierId:guid}/players", GetCashierPlayers)
             .WithName("AdminGetCashierPlayers")
             .WithTags("Admin");
-        group.MapDelete("/cashiers/{cashierId:guid}/players/{playerId:guid}", UnassignPlayerFromCashier)
+        app.MapDelete("/cashiers/{cashierId:guid}/players/{playerId:guid}", UnassignPlayerFromCashier)
             .WithName("AdminUnassignPlayerFromCashier")
             .WithTags("Admin");
 
         // Audit endpoints (unique functionality)
-        group.MapGet("/audit/backoffice", GetBackofficeAudit)
+        app.MapGet("/audit/backoffice", GetBackofficeAudit)
             .WithName("AdminGetBackofficeAudit")
             .WithTags("Admin");
-        group.MapGet("/audit/provider", GetProviderAudit)
+        app.MapGet("/audit/provider", GetProviderAudit)
             .WithName("AdminGetProviderAudit")
             .WithTags("Admin");
     }
@@ -136,7 +132,7 @@ public static class AdminEndpoints
         var cashier = await context.BackofficeUsers
             .FirstOrDefaultAsync(u => u.Id == cashierId && 
                                      u.Role == BackofficeUserRole.CASHIER &&
-                                     u.OperatorId == brandContext.OperatorId);
+                                     u.BrandId == brandContext.BrandId);
         
         if (cashier == null)
             return Results.Problem("Cashier Not Found", statusCode: 404);
@@ -254,10 +250,10 @@ public static class AdminEndpoints
             .Include(a => a.User)
             .AsNoTracking();
 
-        // Filter by brand's operator if brand context is available
+        // Filter by brand if brand context is available
         if (brandContext.IsResolved)
         {
-            query = query.Where(a => a.User.OperatorId == brandContext.OperatorId);
+            query = query.Where(a => a.User.BrandId == brandContext.BrandId);
         }
 
         if (userId.HasValue)

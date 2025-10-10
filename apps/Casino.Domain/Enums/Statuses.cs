@@ -13,12 +13,6 @@ public enum BrandStatus
     INACTIVE
 }
 
-public enum OperatorStatus
-{
-    ACTIVE,
-    INACTIVE
-}
-
 public enum GameSessionStatus
 {
     OPEN,
@@ -36,8 +30,9 @@ public enum RoundStatus
 public enum BackofficeUserRole
 {
     SUPER_ADMIN,
-    OPERATOR_ADMIN,
-    CASHIER
+    BRAND_ADMIN,
+    CASHIER,
+    PLAYER
 }
 
 public enum BackofficeUserStatus

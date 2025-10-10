@@ -8,6 +8,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Casino.Api.Endpoints;
 
+/// <summary>
+/// SONNET: Endpoints de Gateway funcionales sin conflictos
+/// Usa LegacyWalletService para mantener compatibilidad con sistema bigint
+/// </summary>
 public static class GatewayEndpoints
 {
     public static void MapGatewayEndpoints(this IEndpointRouteBuilder app)
@@ -52,7 +56,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> GetBalance(
         [FromBody] BalanceGatewayRequest request,
-        IWalletService walletService,
+        ILegacyWalletService walletService,
         IAuditService auditService,
         CasinoDbContext context,
         HttpContext httpContext,
@@ -92,13 +96,15 @@ public static class GatewayEndpoints
                     statusCode: 400);
             }
 
-            var balanceRequest = new BalanceRequest(session.PlayerId);
-            var response = await walletService.GetBalanceAsync(balanceRequest);
+            var balanceRequest = new WalletBalanceRequest(session.PlayerId);
+            var balanceResponse = await walletService.GetBalanceAsync(balanceRequest);
 
-            var gatewayResponse = new BalanceGatewayResponse(response.Balance);
+            // Convertir de decimal a long (centavos) para gateway
+            var balanceInCents = (long)(balanceResponse.Balance * 100);
+            var gatewayResponse = new BalanceGatewayResponse(balanceInCents);
             
             logger.LogInformation("Balance retrieved for session: {SessionId}, Provider: {Provider}, Balance: {Balance}", 
-                request.SessionId, provider, response.Balance);
+                request.SessionId, provider, balanceInCents);
             
             await auditService.LogProviderActionAsync(provider, "GET_BALANCE", request.SessionId, 
                 request.PlayerId, requestData: request, responseData: gatewayResponse);
@@ -120,7 +126,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> PlaceBet(
         [FromBody] BetRequest request,
-        IWalletService walletService,
+        ILegacyWalletService walletService,
         IAuditService auditService,
         CasinoDbContext context,
         HttpContext httpContext,
@@ -177,18 +183,19 @@ public static class GatewayEndpoints
             }
 
             // Process bet
-            var debitRequest = new DebitRequest(
+            var debitRequest = new WalletDebitRequest(
                 session.PlayerId,
                 request.Amount,
-                LedgerReason.BET,
-                roundId,
-                request.TxId,
-                session.GameCode,
-                provider);
+                "BET",
+                request.RoundId,
+                request.TxId
+            );
 
             var response = await walletService.DebitAsync(debitRequest);
 
-            var gatewayResponse = new GatewayResponse(response.Success, response.Balance, response.ErrorMessage);
+            // Convertir balance de decimal a long para gateway
+            var balanceInCents = response.Balance.HasValue ? (long)(response.Balance.Value * 100) : 0;
+            var gatewayResponse = new GatewayResponse(response.Success, balanceInCents, response.ErrorMessage);
 
             if (!response.Success)
             {
@@ -237,7 +244,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> ProcessWin(
         [FromBody] WinRequest request,
-        IWalletService walletService,
+        ILegacyWalletService walletService,
         IAuditService auditService,
         CasinoDbContext context,
         HttpContext httpContext,
@@ -290,18 +297,19 @@ public static class GatewayEndpoints
             }
 
             // Process win
-            var creditRequest = new CreditRequest(
+            var creditRequest = new WalletCreditRequest(
                 session.PlayerId,
                 request.Amount,
-                LedgerReason.WIN,
-                roundId,
-                request.TxId,
-                session.GameCode,
-                provider);
+                "WIN",
+                request.RoundId,
+                request.TxId
+            );
 
             var response = await walletService.CreditAsync(creditRequest);
 
-            var gatewayResponse = new GatewayResponse(response.Success, response.Balance, response.ErrorMessage);
+            // Convertir balance de decimal a long para gateway
+            var balanceInCents = response.Balance.HasValue ? (long)(response.Balance.Value * 100) : 0;
+            var gatewayResponse = new GatewayResponse(response.Success, balanceInCents, response.ErrorMessage);
 
             if (!response.Success)
             {
@@ -344,7 +352,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> ProcessRollback(
         [FromBody] RollbackGatewayRequest request,
-        IWalletService walletService,
+        ILegacyWalletService walletService,
         IAuditService auditService,
         HttpContext httpContext,
         ILogger<Program> logger)
@@ -353,10 +361,12 @@ public static class GatewayEndpoints
         
         try
         {
-            var rollbackRequest = new RollbackRequest(request.TxIdOriginal);
+            var rollbackRequest = new WalletRollbackRequest(request.TxIdOriginal);
             var response = await walletService.RollbackAsync(rollbackRequest);
 
-            var gatewayResponse = new GatewayResponse(response.Success, response.Balance, response.ErrorMessage);
+            // Convertir balance de decimal a long para gateway
+            var balanceInCents = response.Balance.HasValue ? (long)(response.Balance.Value * 100) : 0;
+            var gatewayResponse = new GatewayResponse(response.Success, balanceInCents, response.ErrorMessage);
 
             if (!response.Success)
             {

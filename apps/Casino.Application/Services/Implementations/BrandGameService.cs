@@ -24,12 +24,12 @@ public class BrandGameService : IBrandGameService
         _logger = logger;
     }
 
-    public async Task<BrandGameResponse> AssignGameToBrandAsync(Guid brandId, AssignGameToBrandRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<BrandGameResponse> AssignGameToBrandAsync(Guid brandId, AssignGameToBrandRequest request, Guid currentUserId, Guid? brandScope = null)
     {
         // Verificar que la marca existe y el usuario tiene acceso
         var brand = await _context.Brands
             .FirstOrDefaultAsync(b => b.Id == brandId && 
-                (operatorScope == null || b.OperatorId == operatorScope));
+                (brandScope == null || b.Id == brandScope));
 
         if (brand == null)
         {
@@ -92,12 +92,12 @@ public class BrandGameService : IBrandGameService
             brandGame.Tags);
     }
 
-    public async Task<GetBrandGamesResponse> GetBrandGamesAsync(Guid brandId, Guid? operatorScope = null)
+    public async Task<GetBrandGamesResponse> GetBrandGamesAsync(Guid brandId, Guid? brandScope = null)
     {
         // Verificar que la marca existe y el usuario tiene acceso
         var brand = await _context.Brands
             .FirstOrDefaultAsync(b => b.Id == brandId && 
-                (operatorScope == null || b.OperatorId == operatorScope));
+                (brandScope == null || b.Id == brandScope));
 
         if (brand == null)
         {
@@ -125,12 +125,12 @@ public class BrandGameService : IBrandGameService
             brandGames);
     }
 
-    public async Task<BrandGameResponse> UpdateBrandGameAsync(Guid brandId, Guid gameId, UpdateBrandGameRequest request, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<BrandGameResponse> UpdateBrandGameAsync(Guid brandId, Guid gameId, UpdateBrandGameRequest request, Guid currentUserId, Guid? brandScope = null)
     {
         // Verificar que la marca existe y el usuario tiene acceso
         var brand = await _context.Brands
             .FirstOrDefaultAsync(b => b.Id == brandId && 
-                (operatorScope == null || b.OperatorId == operatorScope));
+                (brandScope == null || b.Id == brandScope));
 
         if (brand == null)
         {
@@ -195,12 +195,12 @@ public class BrandGameService : IBrandGameService
             brandGame.Tags);
     }
 
-    public async Task<bool> RemoveGameFromBrandAsync(Guid brandId, Guid gameId, Guid currentUserId, Guid? operatorScope = null)
+    public async Task<bool> RemoveGameFromBrandAsync(Guid brandId, Guid gameId, Guid currentUserId, Guid? brandScope = null)
     {
         // Verificar que la marca existe y el usuario tiene acceso
         var brand = await _context.Brands
             .FirstOrDefaultAsync(b => b.Id == brandId && 
-                (operatorScope == null || b.OperatorId == operatorScope));
+                (brandScope == null || b.Id == brandScope));
 
         if (brand == null)
         {

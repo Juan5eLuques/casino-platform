@@ -2,14 +2,14 @@ using Casino.Domain.Enums;
 
 namespace Casino.Application.DTOs.Player;
 
-// Request DTOs
+// Request DTOs - SIN BrandId (se resuelve automáticamente por Host)
 public record CreatePlayerRequest(
-    Guid BrandId,
     string Username,
     string? Email = null,
     string? ExternalId = null,
     long InitialBalance = 0,
-    PlayerStatus Status = PlayerStatus.ACTIVE);
+    PlayerStatus Status = PlayerStatus.ACTIVE,
+    string? Password = null); // Password opcional para jugadores
 
 public record UpdatePlayerRequest(
     string? Username = null,
@@ -17,10 +17,10 @@ public record UpdatePlayerRequest(
     PlayerStatus? Status = null);
 
 public record QueryPlayersRequest(
-    Guid? BrandId = null,
     string? Username = null,
     string? Email = null,
     PlayerStatus? Status = null,
+    bool GlobalScope = false, // Solo para SUPER_ADMIN: ver players de todos los brands
     int Page = 1,
     int PageSize = 20);
 

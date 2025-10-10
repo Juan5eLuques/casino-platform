@@ -29,7 +29,6 @@ public record UpdateBrandStatusRequest(
     BrandStatus Status);
 
 public record QueryBrandsRequest(
-    Guid? OperatorId = null,
     BrandStatus? Status = null,
     string? Search = null,
     int Page = 1,
@@ -54,7 +53,7 @@ public record RotateProviderSecretRequest(
 // Response DTOs
 public record GetBrandResponse(
     Guid Id,
-    Guid OperatorId,
+    Guid? OperatorId, // Keep for backward compatibility but will be null
     string Code,
     string Name,
     string Locale,
@@ -66,7 +65,7 @@ public record GetBrandResponse(
     BrandStatus Status,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    OperatorInfo? Operator = null);
+    OperatorInfo? Operator = null); // Keep for backward compatibility but will be null
 
 public record OperatorInfo(
     Guid Id,

@@ -12,7 +12,6 @@ public class CasinoDbContext : DbContext
     }
 
     // DbSets
-    public DbSet<Operator> Operators { get; set; }
     public DbSet<Brand> Brands { get; set; }
     public DbSet<Player> Players { get; set; }
     public DbSet<Wallet> Wallets { get; set; }
@@ -26,18 +25,12 @@ public class CasinoDbContext : DbContext
     public DbSet<BackofficeAudit> BackofficeAudits { get; set; }
     public DbSet<ProviderAudit> ProviderAudits { get; set; }
     public DbSet<BrandProviderConfig> BrandProviderConfigs { get; set; }
+    
+    // Simple Wallet System
+    public DbSet<WalletTransaction> WalletTransactions { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Operator configuration
-        modelBuilder.Entity<Operator>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
-            entity.Property(e => e.Status).HasConversion<string>();
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-        });
-
         // Brand configuration
         modelBuilder.Entity<Brand>(entity =>
         {
@@ -65,10 +58,6 @@ public class CasinoDbContext : DbContext
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            
-            entity.HasOne(e => e.Operator)
-                .WithMany(o => o.Brands)
-                .HasForeignKey(e => e.OperatorId);
         });
 
         // Player configuration
@@ -82,10 +71,21 @@ public class CasinoDbContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(255);
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.WalletBalance)
+                .HasColumnType("decimal(18,2)")
+                .HasDefaultValue(0.00m);
+            // SONNET: Campo CreatedByRole para auditoría
+            entity.Property(e => e.CreatedByRole).HasMaxLength(50);
             
             entity.HasOne(e => e.Brand)
                 .WithMany(b => b.Players)
                 .HasForeignKey(e => e.BrandId);
+                
+            // Relación con el usuario de backoffice que creó al jugador
+            entity.HasOne(e => e.CreatedByUser)
+                .WithMany() // Un usuario puede crear muchos jugadores
+                .HasForeignKey(e => e.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull); // Si se elimina el creador, no eliminar el jugador
         });
 
         // Wallet configuration
@@ -117,9 +117,6 @@ public class CasinoDbContext : DbContext
                 .HasColumnType("jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             
-            entity.HasOne(e => e.Operator)
-                .WithMany(o => o.LedgerEntries)
-                .HasForeignKey(e => e.OperatorId);
             entity.HasOne(e => e.Brand)
                 .WithMany(b => b.LedgerEntries)
                 .HasForeignKey(e => e.BrandId);
@@ -200,10 +197,29 @@ public class CasinoDbContext : DbContext
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.LastLoginAt); // Nullable DateTime
+            // SONNET: Renombrado de CommissionRate a CommissionPercent
+            entity.Property(e => e.CommissionPercent).HasDefaultValue(0).HasPrecision(5, 2);
+            entity.Property(e => e.WalletBalance)
+                .HasColumnType("decimal(18,2)")
+                .HasDefaultValue(0.00m);
+            // SONNET: Campo CreatedByRole para auditoría
+            entity.Property(e => e.CreatedByRole).HasMaxLength(50);
             
-            entity.HasOne(e => e.Operator)
-                .WithMany(o => o.BackofficeUsers)
-                .HasForeignKey(e => e.OperatorId);
+            entity.HasOne(e => e.Brand)
+                .WithMany(b => b.BrandUsers)
+                .HasForeignKey(e => e.BrandId);
+            
+            // Hierarchical relationship for cashiers
+            entity.HasOne(e => e.ParentCashier)
+                .WithMany(p => p.SubordinateCashiers)
+                .HasForeignKey(e => e.ParentCashierId)
+                .OnDelete(DeleteBehavior.Restrict);
+                
+            // Relación con el usuario que creó este usuario
+            entity.HasOne(e => e.CreatedByUser)
+                .WithMany() // Un usuario puede crear muchos usuarios
+                .HasForeignKey(e => e.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull); // Si se elimina el creador, no eliminar el usuario
         });
 
         // CashierPlayer configuration
@@ -263,6 +279,72 @@ public class CasinoDbContext : DbContext
             entity.HasOne(e => e.Brand)
                 .WithMany(b => b.ProviderConfigs)
                 .HasForeignKey(e => e.BrandId);
+        });
+
+        // === SIMPLE WALLET SYSTEM CONFIGURATION ===
+        
+        // WalletTransaction configuration
+        modelBuilder.Entity<WalletTransaction>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            
+            // SONNET: Índices para rendimiento y consultas por scope
+            entity.HasIndex(e => e.BrandId);
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.FromUserId);
+            entity.HasIndex(e => e.ToUserId);
+            entity.HasIndex(e => e.CreatedByUserId);
+            
+            // SONNET: Índice único para idempotencia 
+            entity.HasIndex(e => e.IdempotencyKey).IsUnique();
+            
+            entity.Property(e => e.FromUserType)
+                .HasMaxLength(20)
+                .HasComment("BACKOFFICE or PLAYER");
+            entity.Property(e => e.ToUserType)
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasComment("BACKOFFICE or PLAYER");
+            entity.Property(e => e.CreatedByRole)
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasComment("Actor role");
+            entity.Property(e => e.Amount)
+                .HasColumnType("decimal(18,2)")
+                .HasComment("Always positive amount");
+            
+            // SONNET: Campos de auditoría para balances before/after
+            entity.Property(e => e.PreviousBalanceFrom)
+                .HasColumnType("decimal(18,2)")
+                .HasComment("Balance of sender BEFORE transaction (null for MINT)");
+            entity.Property(e => e.NewBalanceFrom)
+                .HasColumnType("decimal(18,2)")
+                .HasComment("Balance of sender AFTER transaction (null for MINT)");
+            entity.Property(e => e.PreviousBalanceTo)
+                .HasColumnType("decimal(18,2)")
+                .HasComment("Balance of receiver BEFORE transaction");
+            entity.Property(e => e.NewBalanceTo)
+                .HasColumnType("decimal(18,2)")
+                .HasComment("Balance of receiver AFTER transaction");
+            
+            entity.Property(e => e.Description)
+                .HasMaxLength(500);
+            entity.Property(e => e.IdempotencyKey)
+                .IsRequired()
+                .HasMaxLength(100)
+                .HasComment("Unique key for idempotency");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+            
+            // Relaciones
+            entity.HasOne(e => e.Brand)
+                .WithMany()
+                .HasForeignKey(e => e.BrandId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }
