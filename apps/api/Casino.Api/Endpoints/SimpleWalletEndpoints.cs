@@ -33,11 +33,7 @@ public static class SimpleWalletEndpoints
 
         // SONNET: GET /transactions - Lista de transacciones con scope
         group.MapGet("/transactions", ListTransactions)
-<<<<<<< HEAD
-            .RequireAuthorization("AnyBackofficeUser") // SONNET: Cambiado de BrandScopedCashierOrAdmin para permitir SUPER_ADMIN
-=======
-            .RequireAuthorization("BrandScopedCashierOrAdmin")
->>>>>>> 1c4652e60a48d83e90f7a7742cb7328644e02a3d
+            .RequireAuthorization("AnyBackofficeUser") // SONNET: Cambiado de BrandScopedCashierOrAdmin para permitir 
             .WithName("ListWalletTransactions")
             .WithSummary("List wallet transactions with filters")
             .WithDescription("Lists transactions respecting role scope. SUPER_ADMIN can use ?globalScope=true.")
@@ -47,11 +43,7 @@ public static class SimpleWalletEndpoints
 
         // SONNET: GET /users/{id}/balance - Balance de usuario
         group.MapGet("/users/{userId:guid}/balance", GetUserBalance)
-<<<<<<< HEAD
             .RequireAuthorization("AnyBackofficeUser") // SONNET: Cambiado de BrandScopedCashierOrAdmin para permitir SUPER_ADMIN
-=======
-            .RequireAuthorization("BrandScopedCashierOrAdmin")
->>>>>>> 1c4652e60a48d83e90f7a7742cb7328644e02a3d
             .WithName("GetUserWalletBalance")
             .WithSummary("Get user wallet balance")
             .WithDescription("Gets current wallet balance. Specify userType query parameter.")
