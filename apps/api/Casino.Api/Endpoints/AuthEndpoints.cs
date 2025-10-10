@@ -13,64 +13,48 @@ public static class AuthEndpoints
 {
     public static void MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
-        var adminAuth = app.MapGroup("/api/v1/admin/auth")
-            .WithTags("Admin Authentication");
-
-        var playerAuth = app.MapGroup("/api/v1/auth")
-            .WithTags("Player Authentication");
-
-        // Admin Authentication
-        adminAuth.MapPost("/login", AdminLogin)
+        // Admin authentication endpoints (unprotected)
+        app.MapPost("/api/v1/admin/auth/login", AdminLogin)
             .WithName("AdminLogin")
-            .WithSummary("Admin login")
-            .Produces<LoginResponse>()
-            .Produces(401)
-            .Produces(500)
-            .AllowAnonymous();
+            .WithTags("Auth");
 
-        adminAuth.MapPost("/logout", AdminLogout)
+        app.MapPost("/api/v1/admin/auth/logout", AdminLogout)
+            .RequireAuthorization("BackofficePolicy")
             .WithName("AdminLogout")
-            .WithSummary("Admin logout")
-            .Produces<LogoutResponse>()
-            .RequireAuthorization("BackofficePolicy");
+            .WithTags("Auth");
 
-        adminAuth.MapGet("/me", GetAdminProfile)
+        app.MapGet("/api/v1/admin/auth/me", GetAdminProfile)
+            .RequireAuthorization("BackofficePolicy")
             .WithName("GetAdminProfile")
-            .WithSummary("Get current admin user profile")
-            .Produces<object>()
-            .RequireAuthorization("BackofficePolicy");
+            .WithTags("Auth");
 
-        // Player Authentication
-        playerAuth.MapPost("/login", PlayerLogin)
+        // Player authentication endpoints (unprotected)
+        app.MapPost("/api/v1/auth/login", PlayerLogin)
             .WithName("PlayerLogin")
-            .WithSummary("Player login")
-            .Produces<LoginResponse>()
-            .Produces(401)
-            .Produces(400)
-            .AllowAnonymous();
+            .WithTags("Auth");
 
-        playerAuth.MapPost("/logout", PlayerLogout)
+        app.MapPost("/api/v1/auth/logout", PlayerLogout)
+            .RequireAuthorization("PlayerPolicy")
             .WithName("PlayerLogout")
-            .WithSummary("Player logout")
-            .Produces<LogoutResponse>()
-            .RequireAuthorization("PlayerPolicy");
+            .WithTags("Auth");
 
-        playerAuth.MapGet("/me", GetPlayerProfile)
+        app.MapGet("/api/v1/auth/me", GetPlayerProfile)
+            .RequireAuthorization("PlayerPolicy")
             .WithName("GetPlayerProfile")
-            .WithSummary("Get current player profile")
-            .Produces<object>()
-            .RequireAuthorization("PlayerPolicy");
+            .WithTags("Auth");
     }
 
-    private static async Task<IResult> AdminLogin(
+    public static async Task<IResult> AdminLogin(
         [FromBody] AdminLoginRequest request,
         CasinoDbContext db,
         IJwtService jwtService,
         IPasswordService passwordService,
         HttpContext httpContext,
         IConfiguration configuration,
-        ILogger<Program> logger)
+        ILoggerFactory loggerFactory)
     {
+        var logger = loggerFactory.CreateLogger("AuthEndpoints");
+        
         try
         {
             // Validate configuration first
@@ -95,7 +79,7 @@ public static class AuthEndpoints
 
             // Find user
             var user = await db.BackofficeUsers
-                .Include(u => u.Operator)
+                .Include(u => u.Brand)
                 .FirstOrDefaultAsync(u => u.Username == request.Username && u.Status == BackofficeUserStatus.ACTIVE);
 
             if (user == null)
@@ -111,8 +95,8 @@ public static class AuthEndpoints
                 return Results.Unauthorized();
             }
 
-            // Verify password
-            if (!passwordService.VerifyPassword(user.PasswordHash, request.Password))
+            // Verify password - CORRECTED: order of parameters (password, hash)
+            if (!passwordService.VerifyPassword(request.Password, user.PasswordHash))
             {
                 logger.LogWarning("Admin login failed: invalid password for username: {Username}", request.Username);
                 return Results.Unauthorized();
@@ -123,25 +107,30 @@ public static class AuthEndpoints
             {
                 new(ClaimTypes.NameIdentifier, user.Id.ToString()),
                 new(ClaimTypes.Name, user.Username),
-                new(ClaimTypes.Role, user.Role.ToString()),
-                new("operator_id", user.OperatorId?.ToString() ?? string.Empty)
+                new(ClaimTypes.Role, user.Role.ToString())
             };
 
-            // Issue JWT
+            // Add brand claim if user has a brand assigned
+            if (user.BrandId.HasValue)
+            {
+                claims.Add(new("brand_id", user.BrandId.Value.ToString()));
+            }
+
+            // Issue JWT con aud = "backoffice" y claims de rol
             var tokenResponse = jwtService.IssueToken("backoffice", claims, TimeSpan.FromHours(8));
 
-            // Set HttpOnly cookie
-            httpContext.Response.Cookies.Append(
-                "bk.token",
-                tokenResponse.AccessToken,
-                new CookieOptions
-                {
-                    HttpOnly = true,
-                    Secure = httpContext.Request.IsHttps, // Secure only if HTTPS
-                    SameSite = SameSiteMode.Lax,
-                    Path = "/admin",
-                    Expires = tokenResponse.ExpiresAt
-                });
+            // Setear cookie HttpOnly para funcionar cross-site (front en :5173 y API en :7182)
+            var cookieOptions = new CookieOptions
+            {
+                HttpOnly = true,                 // Cookie no accesible desde JavaScript (seguridad)
+                Secure = httpContext.Request.IsHttps,   // HTTPS obligatorio en producción
+                SameSite = SameSiteMode.None,    // cross-site necesario para dominios diferentes
+                Path = "/",                      // Path "/" para cubrir todas las rutas /api/*
+                // Domain omitido intencionalmente para development (host-only)
+                Expires = DateTimeOffset.UtcNow.AddHours(8)
+            };
+            
+            httpContext.Response.Cookies.Append("bk.token", tokenResponse.AccessToken, cookieOptions);
 
             // Update last login
             user.LastLoginAt = DateTime.UtcNow;
@@ -150,18 +139,8 @@ public static class AuthEndpoints
             logger.LogInformation("Successful admin login for user: {UserId} - {Username} - Role: {Role}", 
                 user.Id, user.Username, user.Role);
 
-            var userResponse = new
-            {
-                user.Id,
-                user.Username,
-                Role = user.Role.ToString(),
-                Operator = user.Operator != null ? new { user.Operator.Id, user.Operator.Name } : null
-            };
-
-            return TypedResults.Ok(new LoginResponse(
-                Success: true,
-                User: userResponse,
-                ExpiresAt: tokenResponse.ExpiresAt));
+            // Return simple success response - el navegador maneja la cookie automáticamente
+            return Results.Ok(new { ok = true });
         }
         catch (Exception ex)
         {
@@ -173,7 +152,7 @@ public static class AuthEndpoints
         }
     }
 
-    private static async Task<IResult> PlayerLogin(
+    public static async Task<IResult> PlayerLogin(
         [FromBody] PlayerLoginRequest request,
         CasinoDbContext db,
         BrandContext brandContext,
@@ -181,8 +160,10 @@ public static class AuthEndpoints
         IPasswordService passwordService,
         HttpContext httpContext,
         IConfiguration configuration,
-        ILogger<Program> logger)
+        ILoggerFactory loggerFactory)
     {
+        var logger = loggerFactory.CreateLogger("AuthEndpoints");
+        
         try
         {
             // Validate configuration first
@@ -293,23 +274,35 @@ public static class AuthEndpoints
         }
     }
 
-    private static IResult AdminLogout(HttpContext httpContext)
+    public static IResult AdminLogout(HttpContext httpContext)
     {
-        httpContext.Response.Cookies.Delete("bk.token", new CookieOptions { Path = "/admin" });
-        return TypedResults.Ok(new LogoutResponse(Success: true, Message: "Logged out successfully"));
+        // Borrar cookie bk.token con mismas opciones que el login (Path/Domain/SameSite)
+        var cookieOptions = new CookieOptions 
+        { 
+            Path = "/",                       // Mismo Path que en login
+            SameSite = SameSiteMode.None,     // Mismo SameSite para cross-site
+            Secure = httpContext.Request.IsHttps,  // Mismo Secure que en login
+            HttpOnly = true                   // HttpOnly para consistencia
+            // Domain omitido intencionalmente para development
+        };
+        
+        httpContext.Response.Cookies.Delete("bk.token", cookieOptions);
+        return Results.Ok(new { ok = true, message = "Logged out successfully" });
     }
 
-    private static IResult PlayerLogout(HttpContext httpContext)
+    public static IResult PlayerLogout(HttpContext httpContext)
     {
         httpContext.Response.Cookies.Delete("pl.token", new CookieOptions { Path = "/" });
         return TypedResults.Ok(new LogoutResponse(Success: true, Message: "Logged out successfully"));
     }
 
-    private static async Task<IResult> GetAdminProfile(
+    public static async Task<IResult> GetAdminProfile(
         HttpContext httpContext,
         CasinoDbContext db,
-        ILogger<Program> logger)
+        ILoggerFactory loggerFactory)
     {
+        var logger = loggerFactory.CreateLogger("AuthEndpoints");
+        
         try
         {
             var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -320,7 +313,7 @@ public static class AuthEndpoints
             }
 
             var user = await db.BackofficeUsers
-                .Include(u => u.Operator)
+                .Include(u => u.Brand)
                 .FirstOrDefaultAsync(u => u.Id == userId);
 
             if (user == null)
@@ -334,7 +327,7 @@ public static class AuthEndpoints
                 user.Id,
                 user.Username,
                 Role = user.Role.ToString(),
-                Operator = user.Operator != null ? new { user.Operator.Id, user.Operator.Name } : null,
+                Brand = user.Brand != null ? new { user.Brand.Id, user.Brand.Name, user.Brand.Code } : null,
                 user.LastLoginAt
             };
 
@@ -347,12 +340,14 @@ public static class AuthEndpoints
         }
     }
 
-    private static async Task<IResult> GetPlayerProfile(
+    public static async Task<IResult> GetPlayerProfile(
         HttpContext httpContext,
         CasinoDbContext db,
         BrandContext brandContext,
-        ILogger<Program> logger)
+        ILoggerFactory loggerFactory)
     {
+        var logger = loggerFactory.CreateLogger("AuthEndpoints");
+        
         try
         {
             var playerIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

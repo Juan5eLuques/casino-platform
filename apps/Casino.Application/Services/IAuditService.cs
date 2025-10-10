@@ -1,3 +1,4 @@
+using Casino.Application.DTOs.Audit;
 using System.Text.Json;
 
 namespace Casino.Application.Services;
@@ -8,4 +9,6 @@ public interface IAuditService
     Task LogProviderActionAsync(string provider, string action, string? sessionId = null, string? playerId = null, 
         string? roundId = null, string? externalRef = null, object? requestData = null, object? responseData = null, 
         int statusCode = 200);
+    Task<QueryBackofficeAuditResponse> GetBackofficeAuditAsync(QueryBackofficeAuditRequest request);
+    Task<QueryProviderAuditResponse> GetProviderAuditAsync(QueryProviderAuditRequest request);
 }

@@ -23,9 +23,13 @@ public class CreateBackofficeUserRequestValidator : AbstractValidator<CreateBack
             .IsInEnum()
             .WithMessage("Invalid role value");
 
+        RuleFor(x => x.CommissionRate)
+            .InclusiveBetween(0, 100)
+            .WithMessage("Commission rate must be between 0 and 100");
+
         RuleFor(x => x)
-            .Must(x => x.Role == BackofficeUserRole.SUPER_ADMIN ? !x.OperatorId.HasValue : x.OperatorId.HasValue)
-            .WithMessage("SUPER_ADMIN cannot have an operator assigned, other roles must have an operator assigned");
+            .Must(x => x.Role == BackofficeUserRole.CASHIER || (!x.ParentCashierId.HasValue && x.CommissionRate == 0))
+            .WithMessage("Only CASHIER role can have ParentCashierId and CommissionRate");
     }
 }
 
@@ -60,6 +64,13 @@ public class UpdateBackofficeUserRequestValidator : AbstractValidator<UpdateBack
             RuleFor(x => x.Status)
                 .IsInEnum()
                 .WithMessage("Invalid status value");
+        });
+
+        When(x => x.CommissionRate.HasValue, () =>
+        {
+            RuleFor(x => x.CommissionRate)
+                .InclusiveBetween(0, 100)
+                .WithMessage("Commission rate must be between 0 and 100");
         });
     }
 }

@@ -1,10 +1,10 @@
+using Casino.Api.Utils;
 using Casino.Application.DTOs.BrandGame;
 using Casino.Application.Services;
 using Casino.Domain.Enums;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
 
 namespace Casino.Api.Endpoints;
 
@@ -12,23 +12,24 @@ public static class BrandGameEndpoints
 {
     public static void MapBrandGameEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/brands/{brandId:guid}/games", AssignGameToBrand)
+        // SONNET: Eliminar {brandId} de la ruta ya que usamos BrandContext
+        app.MapPost("/brands/games", AssignGameToBrand)
             .WithName("AssignGameToBrand")
-            .WithSummary("Assign a game to a brand")
+            .WithSummary("Assign a game to current brand")
             .WithTags("Brand Game Management")
             .Produces<BrandGameResponse>(201)
             .Produces(400)
             .Produces(409)
             .ProducesValidationProblem();
 
-        app.MapGet("/brands/{brandId:guid}/games", GetBrandGames)
+        app.MapGet("/brands/games", GetBrandGames)
             .WithName("GetBrandGamesAdmin")
-            .WithSummary("Get games assigned to a brand")
+            .WithSummary("Get games assigned to current brand")
             .WithTags("Brand Game Management")
             .Produces<GetBrandGamesResponse>()
             .Produces(404);
 
-        app.MapPatch("/brands/{brandId:guid}/games/{gameId:guid}", UpdateBrandGame)
+        app.MapPatch("/brands/games/{gameId:guid}", UpdateBrandGame)
             .WithName("UpdateBrandGame")
             .WithSummary("Update brand game configuration")
             .WithTags("Brand Game Management")
@@ -36,22 +37,23 @@ public static class BrandGameEndpoints
             .Produces(404)
             .ProducesValidationProblem();
 
-        app.MapDelete("/brands/{brandId:guid}/games/{gameId:guid}", RemoveGameFromBrand)
+        app.MapDelete("/brands/games/{gameId:guid}", RemoveGameFromBrand)
             .WithName("RemoveGameFromBrand")
-            .WithSummary("Remove a game from a brand")
+            .WithSummary("Remove a game from current brand")
             .WithTags("Brand Game Management")
             .Produces(200)
             .Produces(404)
             .Produces(409);
     }
 
+    // SONNET: Corregido parámetros con [FromServices] y usar BrandContext.BrandId
     private static async Task<IResult> AssignGameToBrand(
-        Guid brandId,
         [FromBody] AssignGameToBrandRequest request,
-        IBrandGameService brandGameService,
-        IValidator<AssignGameToBrandRequest> validator,
+        [FromServices] IBrandGameService brandGameService,
+        [FromServices] IValidator<AssignGameToBrandRequest> validator,
+        [FromServices] BrandContext brandContext,
         HttpContext httpContext,
-        ILogger<Program> logger)
+        [FromServices] ILogger<Program> logger)
     {
         var validationResult = await validator.ValidateAsync(request);
         if (!validationResult.IsValid)
@@ -59,25 +61,40 @@ public static class BrandGameEndpoints
 
         try
         {
-            var currentUserId = GetCurrentUserId(httpContext);
-            var currentRole = GetCurrentUserRole(httpContext);
-            var operatorScope = GetOperatorScope(httpContext, currentRole);
+            // SONNET: Validar que el brand esté resuelto
+            if (!brandContext.IsResolved)
+            {
+                return Results.BadRequest(new { error = "brand_not_resolved", message = "Brand context could not be resolved from host" });
+            }
 
-            // Solo SUPER_ADMIN y OPERATOR_ADMIN pueden asignar juegos
-            if (currentRole == BackofficeUserRole.CASHIER)
+            var brandId = brandContext.BrandId; // SONNET: Usar BrandContext en lugar de parámetro
+
+            var currentUserId = AuthorizationHelper.GetCurrentUserId(httpContext);
+            var currentRole = AuthorizationHelper.GetCurrentUserRole(httpContext);
+            var currentUserBrandId = AuthorizationHelper.GetCurrentUserBrandId(httpContext);
+
+            // Validar permisos usando el método correcto
+            var permissionError = AuthorizationHelper.ValidateUserOperationPermissions(currentRole);
+            if (permissionError != null)
+                return permissionError;
+
+            // Validar que solo SUPER_ADMIN o BRAND_ADMIN pueden asignar juegos
+            if (currentRole != BackofficeUserRole.SUPER_ADMIN && currentRole != BackofficeUserRole.BRAND_ADMIN)
             {
                 return Results.Problem(
                     title: "Access Denied",
-                    detail: "CASHIER role cannot assign games to brands",
+                    detail: "Only SUPER_ADMIN or BRAND_ADMIN can assign games to brands",
                     statusCode: 403);
             }
 
-            var response = await brandGameService.AssignGameToBrandAsync(brandId, request, currentUserId, operatorScope);
+            var brandScope = AuthorizationHelper.GetQueryScope(currentRole, currentUserBrandId, brandContext);
+
+            var response = await brandGameService.AssignGameToBrandAsync(brandId, request, currentUserId, brandScope);
             
-            logger.LogInformation("Game assigned to brand: {GameId} to {BrandId} by user {UserId}",
-                request.GameId, brandId, currentUserId);
+            logger.LogInformation("Game assigned to brand: {GameId} to {BrandId} by {AuthContext}",
+                request.GameId, brandId, AuthorizationHelper.GetAuthorizationContext(httpContext, brandContext));
             
-            return TypedResults.Created($"/api/v1/admin/brands/{brandId}/games/{request.GameId}", response);
+            return TypedResults.Created($"/api/v1/admin/brands/games/{request.GameId}", response);
         }
         catch (InvalidOperationException ex)
         {
@@ -89,7 +106,7 @@ public static class BrandGameEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error assigning game {GameId} to brand {BrandId}", request.GameId, brandId);
+            logger.LogError(ex, "Error assigning game {GameId} to brand", request.GameId);
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "An error occurred while assigning game to brand",
@@ -97,18 +114,28 @@ public static class BrandGameEndpoints
         }
     }
 
+    // SONNET: Corregido parámetros con [FromServices]
     private static async Task<IResult> GetBrandGames(
-        Guid brandId,
-        IBrandGameService brandGameService,
+        [FromServices] IBrandGameService brandGameService,
+        [FromServices] BrandContext brandContext,
         HttpContext httpContext,
-        ILogger<Program> logger)
+        [FromServices] ILogger<Program> logger)
     {
         try
         {
-            var currentRole = GetCurrentUserRole(httpContext);
-            var operatorScope = GetOperatorScope(httpContext, currentRole);
+            // SONNET: Validar que el brand esté resuelto
+            if (!brandContext.IsResolved)
+            {
+                return Results.BadRequest(new { error = "brand_not_resolved", message = "Brand context could not be resolved from host" });
+            }
 
-            var response = await brandGameService.GetBrandGamesAsync(brandId, operatorScope);
+            var brandId = brandContext.BrandId; // SONNET: Usar BrandContext
+
+            var currentRole = AuthorizationHelper.GetCurrentUserRole(httpContext);
+            var currentUserBrandId = AuthorizationHelper.GetCurrentUserBrandId(httpContext);
+            var brandScope = AuthorizationHelper.GetQueryScope(currentRole, currentUserBrandId, brandContext);
+
+            var response = await brandGameService.GetBrandGamesAsync(brandId, brandScope);
             return TypedResults.Ok(response);
         }
         catch (InvalidOperationException ex)
@@ -121,7 +148,7 @@ public static class BrandGameEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error getting brand games for brand {BrandId}", brandId);
+            logger.LogError(ex, "Error getting brand games");
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "An error occurred while getting brand games",
@@ -129,14 +156,15 @@ public static class BrandGameEndpoints
         }
     }
 
+    // SONNET: Corregido parámetros con [FromServices]
     private static async Task<IResult> UpdateBrandGame(
-        Guid brandId,
         Guid gameId,
         [FromBody] UpdateBrandGameRequest request,
-        IBrandGameService brandGameService,
-        IValidator<UpdateBrandGameRequest> validator,
+        [FromServices] IBrandGameService brandGameService,
+        [FromServices] IValidator<UpdateBrandGameRequest> validator,
+        [FromServices] BrandContext brandContext,
         HttpContext httpContext,
-        ILogger<Program> logger)
+        [FromServices] ILogger<Program> logger)
     {
         var validationResult = await validator.ValidateAsync(request);
         if (!validationResult.IsValid)
@@ -144,23 +172,38 @@ public static class BrandGameEndpoints
 
         try
         {
-            var currentUserId = GetCurrentUserId(httpContext);
-            var currentRole = GetCurrentUserRole(httpContext);
-            var operatorScope = GetOperatorScope(httpContext, currentRole);
+            // SONNET: Validar que el brand esté resuelto
+            if (!brandContext.IsResolved)
+            {
+                return Results.BadRequest(new { error = "brand_not_resolved", message = "Brand context could not be resolved from host" });
+            }
 
-            // Solo SUPER_ADMIN y OPERATOR_ADMIN pueden actualizar configuración de juegos
-            if (currentRole == BackofficeUserRole.CASHIER)
+            var brandId = brandContext.BrandId; // SONNET: Usar BrandContext
+
+            var currentUserId = AuthorizationHelper.GetCurrentUserId(httpContext);
+            var currentRole = AuthorizationHelper.GetCurrentUserRole(httpContext);
+            var currentUserBrandId = AuthorizationHelper.GetCurrentUserBrandId(httpContext);
+
+            // Validar permisos usando el método correcto
+            var permissionError = AuthorizationHelper.ValidateUserOperationPermissions(currentRole);
+            if (permissionError != null)
+                return permissionError;
+
+            // Validar que solo SUPER_ADMIN o BRAND_ADMIN pueden actualizar configuración de juegos
+            if (currentRole != BackofficeUserRole.SUPER_ADMIN && currentRole != BackofficeUserRole.BRAND_ADMIN)
             {
                 return Results.Problem(
                     title: "Access Denied",
-                    detail: "CASHIER role cannot update brand game configuration",
+                    detail: "Only SUPER_ADMIN or BRAND_ADMIN can update brand game configuration",
                     statusCode: 403);
             }
 
-            var response = await brandGameService.UpdateBrandGameAsync(brandId, gameId, request, currentUserId, operatorScope);
+            var brandScope = AuthorizationHelper.GetQueryScope(currentRole, currentUserBrandId, brandContext);
+
+            var response = await brandGameService.UpdateBrandGameAsync(brandId, gameId, request, currentUserId, brandScope);
             
-            logger.LogInformation("Brand game updated: {GameId} in {BrandId} by user {UserId}",
-                gameId, brandId, currentUserId);
+            logger.LogInformation("Brand game updated: {GameId} in {BrandId} by {AuthContext}",
+                gameId, brandId, AuthorizationHelper.GetAuthorizationContext(httpContext, brandContext));
             
             return TypedResults.Ok(response);
         }
@@ -174,7 +217,7 @@ public static class BrandGameEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error updating brand game {GameId} in brand {BrandId}", gameId, brandId);
+            logger.LogError(ex, "Error updating brand game {GameId}", gameId);
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "An error occurred while updating brand game",
@@ -182,29 +225,45 @@ public static class BrandGameEndpoints
         }
     }
 
+    // SONNET: Corregido parámetros con [FromServices]
     private static async Task<IResult> RemoveGameFromBrand(
-        Guid brandId,
         Guid gameId,
-        IBrandGameService brandGameService,
+        [FromServices] IBrandGameService brandGameService,
+        [FromServices] BrandContext brandContext,
         HttpContext httpContext,
-        ILogger<Program> logger)
+        [FromServices] ILogger<Program> logger)
     {
         try
         {
-            var currentUserId = GetCurrentUserId(httpContext);
-            var currentRole = GetCurrentUserRole(httpContext);
-            var operatorScope = GetOperatorScope(httpContext, currentRole);
+            // SONNET: Validar que el brand esté resuelto
+            if (!brandContext.IsResolved)
+            {
+                return Results.BadRequest(new { error = "brand_not_resolved", message = "Brand context could not be resolved from host" });
+            }
 
-            // Solo SUPER_ADMIN y OPERATOR_ADMIN pueden remover juegos
-            if (currentRole == BackofficeUserRole.CASHIER)
+            var brandId = brandContext.BrandId; // SONNET: Usar BrandContext
+
+            var currentUserId = AuthorizationHelper.GetCurrentUserId(httpContext);
+            var currentRole = AuthorizationHelper.GetCurrentUserRole(httpContext);
+            var currentUserBrandId = AuthorizationHelper.GetCurrentUserBrandId(httpContext);
+
+            // Validar permisos usando el método correcto
+            var permissionError = AuthorizationHelper.ValidateUserOperationPermissions(currentRole);
+            if (permissionError != null)
+                return permissionError;
+
+            // Validar que solo SUPER_ADMIN o BRAND_ADMIN pueden remover juegos
+            if (currentRole != BackofficeUserRole.SUPER_ADMIN && currentRole != BackofficeUserRole.BRAND_ADMIN)
             {
                 return Results.Problem(
                     title: "Access Denied",
-                    detail: "CASHIER role cannot remove games from brands",
+                    detail: "Only SUPER_ADMIN or BRAND_ADMIN can remove games from brands",
                     statusCode: 403);
             }
 
-            var success = await brandGameService.RemoveGameFromBrandAsync(brandId, gameId, currentUserId, operatorScope);
+            var brandScope = AuthorizationHelper.GetQueryScope(currentRole, currentUserBrandId, brandContext);
+
+            var success = await brandGameService.RemoveGameFromBrandAsync(brandId, gameId, currentUserId, brandScope);
             
             if (!success)
             {
@@ -214,8 +273,8 @@ public static class BrandGameEndpoints
                     statusCode: 404);
             }
 
-            logger.LogInformation("Game removed from brand: {GameId} from {BrandId} by user {UserId}",
-                gameId, brandId, currentUserId);
+            logger.LogInformation("Game removed from brand: {GameId} from {BrandId} by {AuthContext}",
+                gameId, brandId, AuthorizationHelper.GetAuthorizationContext(httpContext, brandContext));
             
             return TypedResults.Ok(new { Success = true, Message = "Game removed from brand successfully" });
         }
@@ -229,43 +288,11 @@ public static class BrandGameEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error removing game {GameId} from brand {BrandId}", gameId, brandId);
+            logger.LogError(ex, "Error removing game {GameId} from brand", gameId);
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "An error occurred while removing game from brand",
                 statusCode: 500);
         }
-    }
-
-    private static Guid GetCurrentUserId(HttpContext httpContext)
-    {
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!Guid.TryParse(userIdClaim, out var userId))
-        {
-            throw new InvalidOperationException("Invalid user ID in token");
-        }
-        return userId;
-    }
-
-    private static BackofficeUserRole GetCurrentUserRole(HttpContext httpContext)
-    {
-        var roleClaim = httpContext.User.FindFirst(ClaimTypes.Role)?.Value;
-        if (!Enum.TryParse<BackofficeUserRole>(roleClaim, out var role))
-        {
-            throw new InvalidOperationException("Invalid role in token");
-        }
-        return role;
-    }
-
-    private static Guid? GetOperatorScope(HttpContext httpContext, BackofficeUserRole role)
-    {
-        if (role == BackofficeUserRole.SUPER_ADMIN)
-            return null; // SUPER_ADMIN ve todas las marcas
-
-        var operatorIdClaim = httpContext.User.FindFirst("operator_id")?.Value;
-        if (Guid.TryParse(operatorIdClaim, out var operatorId))
-            return operatorId;
-
-        return null;
     }
 }

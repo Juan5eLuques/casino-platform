@@ -6,7 +6,7 @@ public class BrandContext
     public string BrandCode { get; set; } = string.Empty;
     public string Domain { get; set; } = string.Empty;
     public string[] CorsOrigins { get; set; } = Array.Empty<string>();
-    public Guid OperatorId { get; set; }
 
-    public bool IsResolved => BrandId != Guid.Empty;
+    public bool IsResolved => BrandId != Guid.Empty && !string.IsNullOrEmpty(BrandCode);
+    public bool IsActive { get; set; } = true;
 }

@@ -2,32 +2,56 @@ using Casino.Domain.Enums;
 
 namespace Casino.Application.DTOs.Wallet;
 
-public record BalanceRequest(Guid PlayerId);
-
-public record BalanceResponse(long Balance);
-
-public record DebitRequest(
-    Guid PlayerId,
-    long Amount,
-    LedgerReason Reason,
-    Guid? RoundId,
-    string ExternalRef,
-    string? GameCode = null,
-    string? Provider = null);
-
-public record CreditRequest(
-    Guid PlayerId,
-    long Amount,
-    LedgerReason Reason,
-    Guid? RoundId,
-    string ExternalRef,
-    string? GameCode = null,
-    string? Provider = null);
-
+/// <summary>
+/// Response para operaciones de wallet (mantener compatibilidad)
+/// </summary>
 public record WalletOperationResponse(
     bool Success,
-    long Balance,
-    long? LedgerId = null,
-    string? ErrorMessage = null);
+    Guid? OperationId,
+    string Message,
+    decimal? Balance = null, // Para compatibilidad con Gateway
+    string? ErrorMessage = null // Para compatibilidad con Gateway
+);
 
-public record RollbackRequest(string ExternalRefOriginal);
+/// <summary>
+/// Request para obtener balance de wallet
+/// </summary>
+public record WalletBalanceRequest(
+    Guid PlayerId
+);
+
+/// <summary>
+/// Response de balance de wallet
+/// </summary>
+public record WalletBalanceResponse(
+    decimal Balance
+);
+
+/// <summary>
+/// Request para débito de wallet (apuestas)
+/// </summary>
+public record WalletDebitRequest(
+    Guid PlayerId,
+    long Amount, // En centavos (bigint legacy)
+    string Reason,
+    string? GameRoundId = null,
+    string? ExternalRef = null
+);
+
+/// <summary>
+/// Request para crédito de wallet (ganancias)
+/// </summary>
+public record WalletCreditRequest(
+    Guid PlayerId,
+    long Amount, // En centavos (bigint legacy)
+    string Reason,
+    string? GameRoundId = null,
+    string? ExternalRef = null
+);
+
+/// <summary>
+/// Request para rollback de transacción
+/// </summary>
+public record WalletRollbackRequest(
+    string ExternalRefOriginal
+);

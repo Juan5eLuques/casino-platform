@@ -1,188 +1,239 @@
 using Casino.Application.DTOs.Player;
-using Casino.Application.DTOs.Wallet;
 using Casino.Application.Services;
 using Casino.Domain.Entities;
 using Casino.Domain.Enums;
 using Casino.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Casino.Application.Services.Implementations;
 
 public class PlayerService : IPlayerService
 {
     private readonly CasinoDbContext _context;
-    private readonly IWalletService _walletService;
     private readonly IAuditService _auditService;
     private readonly ILogger<PlayerService> _logger;
 
     public PlayerService(
         CasinoDbContext context,
-        IWalletService walletService,
         IAuditService auditService,
         ILogger<PlayerService> logger)
     {
         _context = context;
-        _walletService = walletService;
         _auditService = auditService;
         _logger = logger;
     }
 
-    public async Task<GetPlayerResponse> CreatePlayerAsync(CreatePlayerRequest request, Guid currentUserId)
+    public async Task<GetPlayerResponse> CreatePlayerAsync(CreatePlayerRequest request, Guid currentUserId, Guid effectiveBrandId, BackofficeUserRole? currentUserRole = null)
     {
-        // Verificar que la marca existe y está activa
+        // Verificar que el username no esté en uso en este brand
+        var existingPlayer = await _context.Players
+            .FirstOrDefaultAsync(p => p.Username == request.Username && p.BrandId == effectiveBrandId);
+
+        if (existingPlayer != null)
+        {
+            throw new InvalidOperationException($"Username '{request.Username}' already exists in this brand");
+        }
+
+        // Verificar externalId si se proporciona
+        if (!string.IsNullOrEmpty(request.ExternalId))
+        {
+            var existingExternalId = await _context.Players
+                .FirstOrDefaultAsync(p => p.ExternalId == request.ExternalId && p.BrandId == effectiveBrandId);
+
+            if (existingExternalId != null)
+            {
+                throw new InvalidOperationException($"External ID '{request.ExternalId}' already exists in this brand");
+            }
+        }
+
+        // Verificar que el brand existe y está activo
         var brand = await _context.Brands
-            .FirstOrDefaultAsync(b => b.Id == request.BrandId && b.Status == BrandStatus.ACTIVE);
+            .FirstOrDefaultAsync(b => b.Id == effectiveBrandId && b.Status == BrandStatus.ACTIVE);
 
         if (brand == null)
         {
             throw new InvalidOperationException("Brand not found or inactive");
         }
 
-        // Verificar username único en la marca
-        var existingPlayer = await _context.Players
-            .FirstOrDefaultAsync(p => p.BrandId == request.BrandId && p.Username == request.Username);
+        var playerId = Guid.NewGuid();
 
-        if (existingPlayer != null)
+        // SONNET: Guardar siempre CreatedByUserId y CreatedByRole para auditoría
+        var createdByUserId = currentUserId;
+        var createdByRole = currentUserRole?.ToString();
+
+        // Crear player
+        var player = new Player
         {
-            throw new InvalidOperationException($"Username '{request.Username}' already exists in brand '{brand.Code}'");
-        }
+            Id = playerId,
+            BrandId = effectiveBrandId,
+            Username = request.Username,
+            Email = request.Email,
+            ExternalId = request.ExternalId,
+            Status = request.Status,
+            // SONNET: Guardar auditoría de creación
+            CreatedByUserId = createdByUserId,
+            CreatedByRole = createdByRole,
+            CreatedAt = DateTime.UtcNow
+        };
 
-        // Verificar external_id único en la marca si se proporciona
-        if (!string.IsNullOrEmpty(request.ExternalId))
+        _context.Players.Add(player);
+
+        // SONNET: Crear wallet legacy (bigint) para compatibilidad con gateway
+        var wallet = new Wallet
         {
-            var existingExternalId = await _context.Players
-                .FirstOrDefaultAsync(p => p.BrandId == request.BrandId && p.ExternalId == request.ExternalId);
+            PlayerId = playerId,
+            BalanceBigint = request.InitialBalance
+        };
 
-            if (existingExternalId != null)
+        _context.Wallets.Add(wallet);
+
+        // Si hay balance inicial, crear entrada en ledger
+        if (request.InitialBalance != 0)
+        {
+            var ledgerEntry = new Ledger
             {
-                throw new InvalidOperationException($"ExternalId '{request.ExternalId}' already exists in brand '{brand.Code}'");
-            }
-        }
-
-        using var transaction = await _context.Database.BeginTransactionAsync();
-
-        try
-        {
-            // Crear el jugador
-            var newPlayer = new Player
-            {
-                Id = Guid.NewGuid(),
-                BrandId = request.BrandId,
-                Username = request.Username,
-                Email = request.Email,
-                ExternalId = request.ExternalId,
-                Status = request.Status,
+                BrandId = effectiveBrandId,
+                PlayerId = playerId,
+                DeltaBigint = request.InitialBalance,
+                Reason = LedgerReason.ADMIN_GRANT,
+                ExternalRef = $"initial_balance_{playerId}",
+                GameCode = null,
+                Provider = null,
+                RoundId = null,
+                Meta = JsonDocument.Parse($"{{\"description\":\"Initial balance\",\"created_by\":\"{currentUserId}\",\"created_by_role\":\"{createdByRole}\"}}"),
                 CreatedAt = DateTime.UtcNow
             };
 
-            _context.Players.Add(newPlayer);
-
-            // Crear wallet
-            var wallet = new Wallet
-            {
-                PlayerId = newPlayer.Id,
-                BalanceBigint = 0
-            };
-
-            _context.Wallets.Add(wallet);
-
-            await _context.SaveChangesAsync();
-
-            // Si hay saldo inicial, hacer un ajuste
-            if (request.InitialBalance > 0)
-            {
-                var creditRequest = new CreditRequest(
-                    newPlayer.Id,
-                    request.InitialBalance,
-                    LedgerReason.ADMIN_GRANT,
-                    null, // no roundId
-                    $"initial_balance_{newPlayer.Id}",
-                    null, // no gameCode
-                    "SYSTEM");
-
-                var creditResponse = await _walletService.CreditAsync(creditRequest);
-                
-                if (!creditResponse.Success)
-                {
-                    throw new InvalidOperationException($"Failed to set initial balance: {creditResponse.ErrorMessage}");
-                }
-
-                wallet.BalanceBigint = creditResponse.Balance;
-            }
-
-            await transaction.CommitAsync();
-
-            // Cargar datos completos para la respuesta
-            await _context.Entry(newPlayer)
-                .Reference(p => p.Brand)
-                .LoadAsync();
-
-            await _context.Entry(newPlayer)
-                .Reference(p => p.Wallet)
-                .LoadAsync();
-
-            await _auditService.LogBackofficeActionAsync(
-                currentUserId,
-                "CREATE_PLAYER",
-                "Player",
-                newPlayer.Id.ToString(),
-                new { 
-                    request.Username,
-                    BrandCode = brand.Code,
-                    request.Email,
-                    request.ExternalId,
-                    InitialBalance = request.InitialBalance,
-                    request.Status 
-                });
-
-            _logger.LogInformation("Player created: {PlayerId} - {Username} in brand {BrandCode} by user {UserId}",
-                newPlayer.Id, newPlayer.Username, brand.Code, currentUserId);
-
-            return new GetPlayerResponse(
-                newPlayer.Id,
-                newPlayer.BrandId,
-                newPlayer.Brand.Code,
-                newPlayer.Brand.Name,
-                newPlayer.Username,
-                newPlayer.Email,
-                newPlayer.ExternalId,
-                newPlayer.Status,
-                newPlayer.Wallet?.BalanceBigint ?? 0,
-                newPlayer.CreatedAt);
+            _context.Ledger.Add(ledgerEntry);
         }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
+
+        await _context.SaveChangesAsync();
+
+        // Cargar brand para respuesta
+        await _context.Entry(player)
+            .Reference(p => p.Brand)
+            .LoadAsync();
+
+        // Auditar
+        await _auditService.LogBackofficeActionAsync(
+            currentUserId,
+            "CREATE_PLAYER",
+            "Player",
+            player.Id.ToString(),
+            new { 
+                request.Username, 
+                request.Email,
+                request.ExternalId,
+                BrandId = effectiveBrandId,
+                BrandName = brand.Name,
+                InitialBalance = request.InitialBalance,
+                CreatedByUserId = createdByUserId,
+                CreatedByRole = createdByRole
+            });
+
+        _logger.LogInformation("Player created: {PlayerId} - {Username} in brand {BrandId} by user {CreatedByUserId} (role: {Role})",
+            player.Id, player.Username, effectiveBrandId, currentUserId, createdByRole);
+
+        return new GetPlayerResponse(
+            player.Id,
+            player.BrandId,
+            brand.Code,
+            brand.Name,
+            player.Username,
+            player.Email,
+            player.ExternalId,
+            player.Status,
+            request.InitialBalance,
+            player.CreatedAt);
     }
 
-    public async Task<QueryPlayersResponse> GetPlayersAsync(QueryPlayersRequest request, Guid? operatorScope = null, Guid? brandScope = null)
+    public async Task<bool> DeletePlayerAsync(Guid playerId, Guid currentUserId, Guid? brandScope = null)
+    {
+        var query = _context.Players
+            .Include(p => p.Brand)
+            .AsQueryable();
+
+        // Aplicar scope por brand si es necesario
+        if (brandScope.HasValue)
+        {
+            query = query.Where(p => p.BrandId == brandScope.Value);
+        }
+
+        var player = await query.FirstOrDefaultAsync(p => p.Id == playerId);
+
+        if (player == null)
+            return false;
+
+        // Verificar que no tenga actividad reciente (opcional - política de negocio)
+        var hasRecentActivity = await _context.GameSessions
+            .AnyAsync(gs => gs.PlayerId == playerId && gs.CreatedAt > DateTime.UtcNow.AddDays(-30));
+
+        if (hasRecentActivity)
+        {
+            throw new InvalidOperationException("Cannot delete player with recent gaming activity");
+        }
+
+        // Eliminar entradas relacionadas en orden correcto
+        // 1. Eliminar sesiones de juego
+        var sessions = await _context.GameSessions
+            .Where(gs => gs.PlayerId == playerId)
+            .ToListAsync();
+        _context.GameSessions.RemoveRange(sessions);
+
+        // 2. Eliminar entradas de ledger
+        var ledgerEntries = await _context.Ledger
+            .Where(l => l.PlayerId == playerId)
+            .ToListAsync();
+        _context.Ledger.RemoveRange(ledgerEntries);
+
+        // 3. Eliminar wallet
+        var wallet = await _context.Wallets
+            .FirstOrDefaultAsync(w => w.PlayerId == playerId);
+        if (wallet != null)
+        {
+            _context.Wallets.Remove(wallet);
+        }
+
+        // 4. Eliminar player
+        _context.Players.Remove(player);
+
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogBackofficeActionAsync(
+            currentUserId,
+            "DELETE_PLAYER",
+            "Player",
+            player.Id.ToString(),
+            new { 
+                player.Username, 
+                player.Email,
+                BrandId = player.BrandId,
+                BrandName = player.Brand?.Name,
+                DeletedAt = DateTime.UtcNow
+            });
+
+        _logger.LogInformation("Player deleted: {PlayerId} - {Username} by user {DeletedByUserId}",
+            player.Id, player.Username, currentUserId);
+
+        return true;
+    }
+
+    public async Task<QueryPlayersResponse> GetPlayersAsync(QueryPlayersRequest request, Guid? brandScope = null)
     {
         var query = _context.Players
             .Include(p => p.Brand)
             .Include(p => p.Wallet)
             .AsQueryable();
 
-        // Aplicar scope por operador
-        if (operatorScope.HasValue)
-        {
-            query = query.Where(p => p.Brand.OperatorId == operatorScope.Value);
-        }
-
-        // Aplicar scope por brand (BrandContext)
+        // Aplicar scope por brand
         if (brandScope.HasValue)
         {
             query = query.Where(p => p.BrandId == brandScope.Value);
         }
 
-        // Aplicar filtros
-        if (request.BrandId.HasValue)
-        {
-            query = query.Where(p => p.BrandId == request.BrandId.Value);
-        }
-
+        // Aplicar filtros adicionales
         if (!string.IsNullOrEmpty(request.Username))
         {
             query = query.Where(p => p.Username.Contains(request.Username));
@@ -190,7 +241,7 @@ public class PlayerService : IPlayerService
 
         if (!string.IsNullOrEmpty(request.Email))
         {
-            query = query.Where(p => p.Email != null && p.Email.Contains(request.Email));
+            query = query.Where(p => p.Email!.Contains(request.Email));
         }
 
         if (request.Status.HasValue)
@@ -204,39 +255,35 @@ public class PlayerService : IPlayerService
             .OrderBy(p => p.Username)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
-            .Select(p => new GetPlayerResponse(
-                p.Id,
-                p.BrandId,
-                p.Brand.Code,
-                p.Brand.Name,
-                p.Username,
-                p.Email,
-                p.ExternalId,
-                p.Status,
-                p.Wallet != null ? p.Wallet.BalanceBigint : 0,
-                p.CreatedAt))
             .ToListAsync();
 
+        var playerResponses = players.Select(p => new GetPlayerResponse(
+            p.Id,
+            p.BrandId,
+            p.Brand.Code,
+            p.Brand.Name,
+            p.Username,
+            p.Email,
+            p.ExternalId, // Usar el ExternalId real del player
+            p.Status,
+            p.Wallet?.BalanceBigint ?? 0,
+            p.CreatedAt
+        ));
+
         return new QueryPlayersResponse(
-            players,
+            playerResponses,
             totalCount,
             request.Page,
             request.PageSize,
             (int)Math.Ceiling((double)totalCount / request.PageSize));
     }
 
-    public async Task<GetPlayerResponse?> GetPlayerAsync(Guid playerId, Guid? operatorScope = null, Guid? brandScope = null)
+    public async Task<GetPlayerResponse?> GetPlayerAsync(Guid playerId, Guid? brandScope = null)
     {
         var query = _context.Players
             .Include(p => p.Brand)
             .Include(p => p.Wallet)
             .AsQueryable();
-
-        // Aplicar scope por operador
-        if (operatorScope.HasValue)
-        {
-            query = query.Where(p => p.Brand.OperatorId == operatorScope.Value);
-        }
 
         // Aplicar scope por brand
         if (brandScope.HasValue)
@@ -256,24 +303,18 @@ public class PlayerService : IPlayerService
             player.Brand.Name,
             player.Username,
             player.Email,
-            player.ExternalId,
+            player.ExternalId, // Usar el ExternalId real del player
             player.Status,
             player.Wallet?.BalanceBigint ?? 0,
             player.CreatedAt);
     }
 
-    public async Task<GetPlayerResponse> UpdatePlayerAsync(Guid playerId, UpdatePlayerRequest request, Guid currentUserId, Guid? operatorScope = null, Guid? brandScope = null)
+    public async Task<GetPlayerResponse> UpdatePlayerAsync(Guid playerId, UpdatePlayerRequest request, Guid currentUserId, Guid? brandScope = null)
     {
         var query = _context.Players
             .Include(p => p.Brand)
             .Include(p => p.Wallet)
             .AsQueryable();
-
-        // Aplicar scope por operador
-        if (operatorScope.HasValue)
-        {
-            query = query.Where(p => p.Brand.OperatorId == operatorScope.Value);
-        }
 
         // Aplicar scope por brand
         if (brandScope.HasValue)
@@ -330,8 +371,7 @@ public class PlayerService : IPlayerService
                 player.Id.ToString(),
                 changes);
 
-            _logger.LogInformation("Player updated: {PlayerId} by user {UserId}",
-                player.Id, currentUserId);
+            _logger.LogInformation("Player updated: {PlayerId} by user {UserId}", player.Id, currentUserId);
         }
 
         return new GetPlayerResponse(
@@ -341,24 +381,18 @@ public class PlayerService : IPlayerService
             player.Brand.Name,
             player.Username,
             player.Email,
-            player.ExternalId,
+            player.ExternalId, // Usar el ExternalId real del player
             player.Status,
             player.Wallet?.BalanceBigint ?? 0,
             player.CreatedAt);
     }
 
-    public async Task<WalletAdjustmentResponse> AdjustPlayerWalletAsync(Guid playerId, AdjustPlayerWalletRequest request, Guid currentUserId, Guid? operatorScope = null, Guid? brandScope = null)
+    public async Task<WalletAdjustmentResponse> AdjustPlayerWalletAsync(Guid playerId, AdjustPlayerWalletRequest request, Guid currentUserId, Guid? brandScope = null)
     {
         var query = _context.Players
             .Include(p => p.Brand)
             .Include(p => p.Wallet)
             .AsQueryable();
-
-        // Aplicar scope por operador
-        if (operatorScope.HasValue)
-        {
-            query = query.Where(p => p.Brand.OperatorId == operatorScope.Value);
-        }
 
         // Aplicar scope por brand
         if (brandScope.HasValue)
@@ -373,91 +407,63 @@ public class PlayerService : IPlayerService
             return new WalletAdjustmentResponse(false, 0, 0, "Player not found or access denied");
         }
 
-        try
+        // Verificar que el wallet existe
+        if (player.Wallet == null)
         {
-            var externalRef = $"admin_adjust_{currentUserId}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}";
-
-            if (request.Amount > 0)
-            {
-                // Crédito
-                var creditRequest = new CreditRequest(
-                    playerId,
-                    request.Amount,
-                    LedgerReason.ADMIN_GRANT,
-                    null, // no roundId
-                    externalRef,
-                    null, // no gameCode
-                    $"ADMIN_{currentUserId}");
-
-                var response = await _walletService.CreditAsync(creditRequest);
-
-                if (response.Success)
-                {
-                    await _auditService.LogBackofficeActionAsync(
-                        currentUserId,
-                        "WALLET_CREDIT",
-                        "Player",
-                        playerId.ToString(),
-                        new { 
-                            Amount = request.Amount,
-                            Reason = request.Reason,
-                            Description = request.Description,
-                            NewBalance = response.Balance,
-                            ExternalRef = externalRef
-                        });
-
-                    _logger.LogInformation("Wallet credit applied: {PlayerId} - Amount: {Amount} by user {UserId}",
-                        playerId, request.Amount, currentUserId);
-                }
-
-                return new WalletAdjustmentResponse(response.Success, response.Balance, response.LedgerId ?? 0, response.ErrorMessage);
-            }
-            else if (request.Amount < 0)
-            {
-                // Débito
-                var debitRequest = new DebitRequest(
-                    playerId,
-                    Math.Abs(request.Amount),
-                    LedgerReason.ADMIN_DEBIT,
-                    null, // no roundId
-                    externalRef,
-                    null, // no gameCode
-                    $"ADMIN_{currentUserId}");
-
-                var response = await _walletService.DebitAsync(debitRequest);
-
-                if (response.Success)
-                {
-                    await _auditService.LogBackofficeActionAsync(
-                        currentUserId,
-                        "WALLET_DEBIT",
-                        "Player",
-                        playerId.ToString(),
-                        new { 
-                            Amount = request.Amount,
-                            Reason = request.Reason,
-                            Description = request.Description,
-                            NewBalance = response.Balance,
-                            ExternalRef = externalRef
-                        });
-
-                    _logger.LogInformation("Wallet debit applied: {PlayerId} - Amount: {Amount} by user {UserId}",
-                        playerId, Math.Abs(request.Amount), currentUserId);
-                }
-
-                return new WalletAdjustmentResponse(response.Success, response.Balance, response.LedgerId ?? 0, response.ErrorMessage);
-            }
-            else
-            {
-                return new WalletAdjustmentResponse(false, 0, 0, "Amount cannot be zero");
-            }
+            player.Wallet = new Wallet { PlayerId = player.Id, BalanceBigint = 0 };
+            _context.Wallets.Add(player.Wallet);
         }
-        catch (Exception ex)
+
+        // Verificar saldo suficiente para débitos
+        if (request.Amount < 0 && player.Wallet.BalanceBigint + request.Amount < 0)
         {
-            _logger.LogError(ex, "Error adjusting wallet for player {PlayerId} by user {UserId}",
-                playerId, currentUserId);
-
-            return new WalletAdjustmentResponse(false, 0, 0, "Internal error occurred during wallet adjustment");
+            return new WalletAdjustmentResponse(false, player.Wallet.BalanceBigint, 0, "Insufficient balance for this adjustment");
         }
+
+        // Crear entrada en el ledger
+        var ledgerEntry = new Ledger
+        {
+            BrandId = player.BrandId,
+            PlayerId = player.Id,
+            DeltaBigint = request.Amount,
+            Reason = LedgerReason.ADJUST,
+            ExternalRef = $"admin_adjustment_{Guid.NewGuid()}",
+            Meta = JsonSerializer.SerializeToDocument(new { 
+                Reason = request.Reason,
+                AdjustedBy = currentUserId,
+                Timestamp = DateTime.UtcNow
+            }),
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Ledger.Add(ledgerEntry);
+
+        // Actualizar saldo del wallet
+        player.Wallet.BalanceBigint += request.Amount;
+
+        await _context.SaveChangesAsync();
+
+        // Auditoría
+        await _auditService.LogBackofficeActionAsync(
+            currentUserId,
+            "ADJUST_PLAYER_WALLET",
+            "Player",
+            player.Id.ToString(),
+            new { 
+                Amount = request.Amount,
+                Reason = request.Reason,
+                PreviousBalance = player.Wallet.BalanceBigint - request.Amount,
+                NewBalance = player.Wallet.BalanceBigint,
+                LedgerEntryId = ledgerEntry.Id
+            });
+
+        _logger.LogInformation("Player wallet adjusted: {PlayerId} - Amount: {Amount} - Reason: {Reason} by user {UserId}",
+            player.Id, request.Amount, request.Reason, currentUserId);
+
+        return new WalletAdjustmentResponse(
+            true, 
+            player.Wallet.BalanceBigint,
+            ledgerEntry.Id,
+            "Wallet adjusted successfully");
     }
 }

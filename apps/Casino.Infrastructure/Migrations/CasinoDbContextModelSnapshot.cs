@@ -68,15 +68,31 @@ namespace Casino.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BrandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CommissionPercent")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)")
+                        .HasDefaultValue(0m);
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<string>("CreatedByRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("LastLoginAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("OperatorId")
+                    b.Property<Guid?>("ParentCashierId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("PasswordHash")
@@ -96,9 +112,18 @@ namespace Casino.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<decimal>("WalletBalance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,2)")
+                        .HasDefaultValue(0.00m);
+
                     b.HasKey("Id");
 
-                    b.HasIndex("OperatorId");
+                    b.HasIndex("BrandId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("ParentCashierId");
 
                     b.HasIndex("Username")
                         .IsUnique();
@@ -144,9 +169,6 @@ namespace Casino.Infrastructure.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<Guid>("OperatorId")
-                        .HasColumnType("uuid");
-
                     b.Property<JsonDocument>("Settings")
                         .HasColumnType("jsonb");
 
@@ -174,8 +196,6 @@ namespace Casino.Infrastructure.Migrations
                     b.HasIndex("Domain")
                         .IsUnique()
                         .HasFilter("\"Domain\" IS NOT NULL");
-
-                    b.HasIndex("OperatorId");
 
                     b.ToTable("Brands");
                 });
@@ -370,9 +390,6 @@ namespace Casino.Infrastructure.Migrations
                     b.Property<JsonDocument>("Meta")
                         .HasColumnType("jsonb");
 
-                    b.Property<Guid>("OperatorId")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid>("PlayerId")
                         .HasColumnType("uuid");
 
@@ -395,39 +412,12 @@ namespace Casino.Infrastructure.Migrations
                         .IsUnique()
                         .HasFilter("external_ref IS NOT NULL");
 
-                    b.HasIndex("OperatorId");
-
                     b.HasIndex("RoundId");
 
                     b.HasIndex("PlayerId", "Id")
                         .HasDatabaseName("IX_Ledger_PlayerId_Id_Desc");
 
                     b.ToTable("Ledger");
-                });
-
-            modelBuilder.Entity("Casino.Domain.Entities.Operator", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Operators");
                 });
 
             modelBuilder.Entity("Casino.Domain.Entities.Player", b =>
@@ -443,6 +433,13 @@ namespace Casino.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("CreatedByRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Email")
                         .HasMaxLength(255)
@@ -460,7 +457,14 @@ namespace Casino.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<decimal>("WalletBalance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,2)")
+                        .HasDefaultValue(0.00m);
+
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("BrandId", "ExternalId")
                         .IsUnique()
@@ -568,6 +572,94 @@ namespace Casino.Infrastructure.Migrations
                     b.ToTable("Wallets");
                 });
 
+            modelBuilder.Entity("Casino.Domain.Entities.WalletTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasComment("Always positive amount");
+
+                    b.Property<Guid>("BrandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("CreatedByRole")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasComment("Actor role");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("FromUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FromUserType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasComment("BACKOFFICE or PLAYER");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasComment("Unique key for idempotency");
+
+                    b.Property<decimal?>("NewBalanceFrom")
+                        .HasColumnType("decimal(18,2)")
+                        .HasComment("Balance of sender AFTER transaction (null for MINT)");
+
+                    b.Property<decimal>("NewBalanceTo")
+                        .HasColumnType("decimal(18,2)")
+                        .HasComment("Balance of receiver AFTER transaction");
+
+                    b.Property<decimal?>("PreviousBalanceFrom")
+                        .HasColumnType("decimal(18,2)")
+                        .HasComment("Balance of sender BEFORE transaction (null for MINT)");
+
+                    b.Property<decimal>("PreviousBalanceTo")
+                        .HasColumnType("decimal(18,2)")
+                        .HasComment("Balance of receiver BEFORE transaction");
+
+                    b.Property<Guid>("ToUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ToUserType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasComment("BACKOFFICE or PLAYER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BrandId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("FromUserId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("ToUserId");
+
+                    b.ToTable("WalletTransactions");
+                });
+
             modelBuilder.Entity("Casino.Domain.Entities.BackofficeAudit", b =>
                 {
                     b.HasOne("Casino.Domain.Entities.BackofficeUser", "User")
@@ -581,22 +673,25 @@ namespace Casino.Infrastructure.Migrations
 
             modelBuilder.Entity("Casino.Domain.Entities.BackofficeUser", b =>
                 {
-                    b.HasOne("Casino.Domain.Entities.Operator", "Operator")
-                        .WithMany("BackofficeUsers")
-                        .HasForeignKey("OperatorId");
+                    b.HasOne("Casino.Domain.Entities.Brand", "Brand")
+                        .WithMany("BrandUsers")
+                        .HasForeignKey("BrandId");
 
-                    b.Navigation("Operator");
-                });
+                    b.HasOne("Casino.Domain.Entities.BackofficeUser", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
-            modelBuilder.Entity("Casino.Domain.Entities.Brand", b =>
-                {
-                    b.HasOne("Casino.Domain.Entities.Operator", "Operator")
-                        .WithMany("Brands")
-                        .HasForeignKey("OperatorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                    b.HasOne("Casino.Domain.Entities.BackofficeUser", "ParentCashier")
+                        .WithMany("SubordinateCashiers")
+                        .HasForeignKey("ParentCashierId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
-                    b.Navigation("Operator");
+                    b.Navigation("Brand");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("ParentCashier");
                 });
 
             modelBuilder.Entity("Casino.Domain.Entities.BrandGame", b =>
@@ -671,12 +766,6 @@ namespace Casino.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Casino.Domain.Entities.Operator", "Operator")
-                        .WithMany("LedgerEntries")
-                        .HasForeignKey("OperatorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("Casino.Domain.Entities.Player", "Player")
                         .WithMany("LedgerEntries")
                         .HasForeignKey("PlayerId")
@@ -688,8 +777,6 @@ namespace Casino.Infrastructure.Migrations
                         .HasForeignKey("RoundId");
 
                     b.Navigation("Brand");
-
-                    b.Navigation("Operator");
 
                     b.Navigation("Player");
 
@@ -704,7 +791,14 @@ namespace Casino.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Casino.Domain.Entities.BackofficeUser", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Brand");
+
+                    b.Navigation("CreatedByUser");
                 });
 
             modelBuilder.Entity("Casino.Domain.Entities.Round", b =>
@@ -729,16 +823,39 @@ namespace Casino.Infrastructure.Migrations
                     b.Navigation("Player");
                 });
 
+            modelBuilder.Entity("Casino.Domain.Entities.WalletTransaction", b =>
+                {
+                    b.HasOne("Casino.Domain.Entities.Brand", "Brand")
+                        .WithMany()
+                        .HasForeignKey("BrandId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Casino.Domain.Entities.BackofficeUser", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Brand");
+
+                    b.Navigation("CreatedByUser");
+                });
+
             modelBuilder.Entity("Casino.Domain.Entities.BackofficeUser", b =>
                 {
                     b.Navigation("BackofficeAudits");
 
                     b.Navigation("CashierPlayers");
+
+                    b.Navigation("SubordinateCashiers");
                 });
 
             modelBuilder.Entity("Casino.Domain.Entities.Brand", b =>
                 {
                     b.Navigation("BrandGames");
+
+                    b.Navigation("BrandUsers");
 
                     b.Navigation("LedgerEntries");
 
@@ -757,15 +874,6 @@ namespace Casino.Infrastructure.Migrations
             modelBuilder.Entity("Casino.Domain.Entities.GameSession", b =>
                 {
                     b.Navigation("Rounds");
-                });
-
-            modelBuilder.Entity("Casino.Domain.Entities.Operator", b =>
-                {
-                    b.Navigation("BackofficeUsers");
-
-                    b.Navigation("Brands");
-
-                    b.Navigation("LedgerEntries");
                 });
 
             modelBuilder.Entity("Casino.Domain.Entities.Player", b =>

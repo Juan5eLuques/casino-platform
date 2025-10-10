@@ -1,17 +1,16 @@
 using Casino.Application.DTOs.Wallet;
-using Casino.Domain.Entities;
 
 namespace Casino.Application.Mappers;
 
 public static class WalletMappers
 {
-    public static BalanceResponse ToBalanceDto(long balanceBigint)
+    public static WalletBalanceResponse ToBalanceDto(long balanceBigint)
     {
-        return new BalanceResponse(balanceBigint);
+        return new WalletBalanceResponse(balanceBigint / 100.0m);
     }
 
-    public static WalletOperationResponse ToOperationDto(bool success, long newBalance, long? ledgerId = null, string? errorMessage = null)
+    public static WalletOperationResponse ToOperationDto(bool success, decimal? newBalance, Guid? operationId = null, string? message = null)
     {
-        return new WalletOperationResponse(success, newBalance, ledgerId, errorMessage);
+        return new WalletOperationResponse(success, operationId, message ?? "Operation completed", newBalance);
     }
 }
