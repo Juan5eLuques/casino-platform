@@ -425,15 +425,10 @@ public class SimpleWalletService : ISimpleWalletService
         // SONNET: CASHIER solo puede transferir con players de su brand
         if (actorRole == BackofficeUserRole.CASHIER)
         {
-            if (toUserType != "PLAYER" || (!isMint && fromUserType != "BACKOFFICE"))
+            // Permitir transferencias solo a PLAYER o BACKOFFICE (otros cajeros)
+            if (toUserType != "PLAYER" && toUserType != "BACKOFFICE")
             {
-                return (false, "CASHIER can only transfer with PLAYER users");
-            }
-
-            var toInBrand = await IsUserInBrandAsync(toUserId, toUserType, brandId);
-            if (!toInBrand)
-            {
-                return (false, "Player not in cashier's brand");
+                return (false, "CASHIER can only transfer to PLAYER or CASHIER users");
             }
 
             return (true, "Authorized");
