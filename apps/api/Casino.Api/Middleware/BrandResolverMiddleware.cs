@@ -39,12 +39,36 @@ public class BrandResolverMiddleware
             return;
         }
 
-        var host = context.Request.Host.Host.ToLower();
-        var port = context.Request.Host.Port;
-        var fullHost = context.Request.Host.Value.ToLower();
+        // SONNET: Priorizar Origin header (dominio del frontend) sobre Host (dominio del backend)
+        var originHeader = context.Request.Headers["Origin"].FirstOrDefault();
+        var refererHeader = context.Request.Headers["Referer"].FirstOrDefault();
         
-        _logger.LogInformation("Resolving brand for host: {Host}, port: {Port}, fullHost: {FullHost}, path: {Path}", 
-            host, port, fullHost, path);
+        // Intentar extraer el dominio del Origin o Referer
+        string? resolvedHost = null;
+        if (!string.IsNullOrEmpty(originHeader))
+        {
+            // Origin: https://backoffice-casino.netlify.app
+            resolvedHost = new Uri(originHeader).Host.ToLower();
+            _logger.LogInformation("Resolving brand by Origin header: {Origin} -> {ResolvedHost}", originHeader, resolvedHost);
+        }
+        else if (!string.IsNullOrEmpty(refererHeader))
+        {
+            // Referer: https://backoffice-casino.netlify.app/some-page
+            resolvedHost = new Uri(refererHeader).Host.ToLower();
+            _logger.LogInformation("Resolving brand by Referer header: {Referer} -> {ResolvedHost}", refererHeader, resolvedHost);
+        }
+        else
+        {
+            // Fallback: usar el Host del backend (para requests directas a la API)
+            resolvedHost = context.Request.Host.Host.ToLower();
+            _logger.LogInformation("Resolving brand by Host (fallback): {Host}", resolvedHost);
+        }
+        
+        var host = resolvedHost;
+        var port = context.Request.Host.Port;
+        var fullHost = resolvedHost;
+        
+        _logger.LogInformation("Final resolved host for brand lookup: {Host}, path: {Path}", host, path);
 
         try
         {
