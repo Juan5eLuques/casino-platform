@@ -289,7 +289,7 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
                       Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
 });
 
-//app.UseHttpsRedirection();
+app.UseHttpsRedirection();
 
 // SONNET: 2) BrandResolverMiddleware
 app.UseMiddleware<BrandResolverMiddleware>();

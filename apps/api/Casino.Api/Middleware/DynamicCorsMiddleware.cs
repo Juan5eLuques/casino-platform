@@ -172,9 +172,10 @@ public class DynamicCorsMiddleware
 
     private bool IsOriginAllowedForAuth(string origin)
     {
-        // Common development origins that should be allowed
+        // SONNET: Common development and production origins that should be allowed
         var allowedOrigins = new[]
         {
+            // Local development
             "http://localhost:5173",
             "http://localhost:3000",
             "http://localhost:5000",
@@ -182,7 +183,9 @@ public class DynamicCorsMiddleware
             "http://admin.bet30.local:5173",
             "https://admin.bet30.local:5173",
             "http://bet30.local:5173",
-            "https://bet30.local:5173"
+            "https://bet30.local:5173",
+            // SONNET: Production origins (Netlify)
+            "https://backoffice-casino.netlify.app"
         };
         
         return allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
