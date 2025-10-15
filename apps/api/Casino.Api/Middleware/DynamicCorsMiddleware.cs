@@ -94,13 +94,14 @@ public class DynamicCorsMiddleware
             var isAllowed = brandContext.CorsOrigins.Length == 0 || // If no CORS origins configured, allow all
                            brandContext.CorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
             
-            // In development, be more permissive
-            if (!isAllowed && _env.IsDevelopment())
+            // SONNET: Fallback para orígenes conocidos (development y production)
+            if (!isAllowed)
             {
-                isAllowed = IsOriginAllowedForAuth(origin) || IsOriginAllowedForDevelopment(origin);
+                isAllowed = IsOriginAllowedForAuth(origin) || 
+                           (_env.IsDevelopment() && IsOriginAllowedForDevelopment(origin));
                 if (isAllowed)
                 {
-                    _logger.LogInformation("CORS allowed for origin {Origin} in development mode", origin);
+                    _logger.LogInformation("CORS allowed for origin {Origin} via fallback (known origin)", origin);
                 }
             }
 
