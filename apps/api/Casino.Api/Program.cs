@@ -51,10 +51,14 @@ builder.Services.AddScoped<ICashierPlayerService, CashierPlayerService>();
 // SONNET: Unified user service - RESTAURA funcionalidad original de /users
 builder.Services.AddScoped<IUnifiedUserService, UnifiedUserService>();
 
-// SONNET: Wallet services - CLEAN SEPARATION
-// Simple wallet service (SIMPLE+ version with guarantees) for admin operations
-builder.Services.AddScoped<ISimpleWalletService, SimpleWalletService>();
-// Legacy wallet service for gateway compatibility (uses bigint system)
+// SONNET: Wallet services - UNIFIED SYSTEM
+// Unified wallet service for gateway/games (uses Player.WalletBalance + WalletTransactions)
+builder.Services.AddScoped<IWalletService, UnifiedWalletService>();
+// Admin transaction service (uses UnifiedWalletService internally for complete unification)
+builder.Services.AddScoped<IAdminTransactionService, AdminTransactionService>();
+// Simple wallet service DEPRECATED (commented out due to compilation issues) 
+// builder.Services.AddScoped<ISimpleWalletService, SimpleWalletService>();
+// Legacy wallet service DEPRECATED (kept for rollback if needed)
 builder.Services.AddScoped<ILegacyWalletService, LegacyWalletService>();
 
 // SONNET: FluentValidation - REGISTER ALL VALIDATORS BY ASSEMBLY
@@ -339,9 +343,13 @@ app.MapGatewayEndpoints();
 // SONNET: Endpoints internos para compatibilidad con gateway usando LegacyWalletService
 app.MapInternalWalletEndpoints();
 
-// === SIMPLE WALLET SYSTEM (FUNCTIONAL) ===
-// SONNET: Sistema simple de transacciones con garantías críticas
-app.MapSimpleWalletEndpoints();
+// === UNIFIED ADMIN TRANSACTION SYSTEM ===
+// SONNET: Sistema administrativo unificado que usa UnifiedWalletService
+app.MapAdminTransactionEndpoints();
+
+// === SIMPLE WALLET SYSTEM (DEPRECATED) ===
+// SONNET: Sistema simple de transacciones DEPRECATED - usar AdminTransactionEndpoints
+// app.MapSimpleWalletEndpoints();
 
 // === WORKING CORE ENDPOINTS ===
 // SONNET: Map protected API endpoints with authorization - UN SOLO MAPGROUP por /api/v1/admin

@@ -56,7 +56,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> GetBalance(
         [FromBody] BalanceGatewayRequest request,
-        ILegacyWalletService walletService,
+        IWalletService walletService,
         IAuditService auditService,
         CasinoDbContext context,
         HttpContext httpContext,
@@ -126,7 +126,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> PlaceBet(
         [FromBody] BetRequest request,
-        ILegacyWalletService walletService,
+        IWalletService walletService,
         IAuditService auditService,
         CasinoDbContext context,
         HttpContext httpContext,
@@ -244,7 +244,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> ProcessWin(
         [FromBody] WinRequest request,
-        ILegacyWalletService walletService,
+        IWalletService walletService,
         IAuditService auditService,
         CasinoDbContext context,
         HttpContext httpContext,
@@ -352,7 +352,7 @@ public static class GatewayEndpoints
 
     private static async Task<IResult> ProcessRollback(
         [FromBody] RollbackGatewayRequest request,
-        ILegacyWalletService walletService,
+        IWalletService walletService,
         IAuditService auditService,
         HttpContext httpContext,
         ILogger<Program> logger)

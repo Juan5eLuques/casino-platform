@@ -32,6 +32,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{02EA681E-C
 		..\..\..\Downloads\casino_docs_md\docs\ROADMAP.md = ..\..\..\Downloads\casino_docs_md\docs\ROADMAP.md
 		..\..\..\Downloads\ROUTES-CLEANUP.md = ..\..\..\Downloads\ROUTES-CLEANUP.md
 		TENANCY.md = TENANCY.md
+		TRANSACTIONS.MD = TRANSACTIONS.MD
 	EndProjectSection
 EndProject
 Global

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Casino.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Casino.Infrastructure.Migrations
 {
     [DbContext(typeof(CasinoDbContext))]
-    partial class CasinoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251013195658_AddTransactionTypeToWalletTransaction")]
+    partial class AddTransactionTypeToWalletTransaction
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -642,8 +645,10 @@ namespace Casino.Infrastructure.Migrations
                         .HasColumnType("character varying(20)")
                         .HasComment("BACKOFFICE or PLAYER");
 
-                    b.Property<int?>("TransactionType")
-                        .HasColumnType("integer");
+                    b.Property<string>("TransactionType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasComment("Transaction type: DEPOSIT, WITHDRAWAL, TRANSFER, BONUS, MINT, BURN, BET, WIN, ROLLBACK, ADJUSTMENT");
 
                     b.HasKey("Id");
 

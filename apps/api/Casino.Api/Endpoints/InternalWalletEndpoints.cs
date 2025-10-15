@@ -7,8 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace Casino.Api.Endpoints;
 
 /// <summary>
-/// SONNET: Endpoints internos de wallet para compatibilidad con gateway
-/// Usa LegacyWalletService para mantener sistema bigint
+/// SONNET: Endpoints internos de wallet UNIFICADO
+/// Usa UnifiedWalletService con Player.WalletBalance + WalletTransactions
 /// </summary>
 public static class InternalWalletEndpoints
 {
@@ -46,7 +46,7 @@ public static class InternalWalletEndpoints
 
     private static async Task<IResult> GetBalance(
         [FromBody] WalletBalanceRequest request,
-        [FromServices] ILegacyWalletService walletService,
+        [FromServices] IWalletService walletService,
         [FromServices] ILogger<Program> logger)
     {
         try
@@ -67,7 +67,7 @@ public static class InternalWalletEndpoints
 
     private static async Task<IResult> DebitWallet(
         [FromBody] WalletDebitRequest request,
-        [FromServices] ILegacyWalletService walletService,
+        [FromServices] IWalletService walletService,
         [FromServices] IValidator<WalletDebitRequest> validator,
         [FromServices] ILogger<Program> logger)
     {
@@ -114,7 +114,7 @@ public static class InternalWalletEndpoints
 
     private static async Task<IResult> CreditWallet(
         [FromBody] WalletCreditRequest request,
-        [FromServices] ILegacyWalletService walletService,
+        [FromServices] IWalletService walletService,
         [FromServices] IValidator<WalletCreditRequest> validator,
         [FromServices] ILogger<Program> logger)
     {
@@ -153,7 +153,7 @@ public static class InternalWalletEndpoints
 
     private static async Task<IResult> RollbackTransaction(
         [FromBody] WalletRollbackRequest request,
-        [FromServices] ILegacyWalletService walletService,
+        [FromServices] IWalletService walletService,
         [FromServices] IValidator<WalletRollbackRequest> validator,
         [FromServices] ILogger<Program> logger)
     {

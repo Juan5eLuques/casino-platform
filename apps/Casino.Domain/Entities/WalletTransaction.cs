@@ -56,17 +56,22 @@ public class WalletTransaction
     /// <summary>
     /// Balance del usuario destino ANTES de la transacción
     /// </summary>
-    public decimal PreviousBalanceTo { get; set; }
+    public decimal? PreviousBalanceTo { get; set; }
     
     /// <summary>
     /// Balance del usuario destino DESPUÉS de la transacción
     /// </summary>
-    public decimal NewBalanceTo { get; set; }
+    public decimal? NewBalanceTo { get; set; }
     
     /// <summary>
     /// Descripción de la transacción
     /// </summary>
     public string? Description { get; set; }
+    
+    /// <summary>
+    /// Tipo de transacción para categorización estándar de casino
+    /// </summary>
+    public TransactionType? TransactionType { get; set; }
     
     /// <summary>
     /// Usuario que ejecutó la transacción
