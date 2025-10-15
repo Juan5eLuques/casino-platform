@@ -6,9 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Compile Include="Dockerfile" />
-  </ItemGroup>
+	<ItemGroup>
+		<Compile Remove="Dockerfile" />
+		<None Include="Dockerfile" />
+	</ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
@@ -28,6 +29,7 @@
     <ProjectReference Include="..\..\Casino.Application\Casino.Application.csproj" />
     <ProjectReference Include="..\..\Casino.Infrastructure\Casino.Infrastructure.csproj" />
   </ItemGroup>
+	
 
   <ItemGroup>
     <Folder Include="DTOs\" />
