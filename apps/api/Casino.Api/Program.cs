@@ -118,6 +118,29 @@ builder.Services.AddAuthentication()
             {
                 var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
                 logger.LogError("🚨 JWT Authentication FAILED: {Error}", context.Exception.Message);
+                
+                // SONNET: Agregar headers CORS para que el navegador pueda leer el error 401
+                var origin = context.Request.Headers["Origin"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(origin))
+                {
+                    context.Response.Headers.Append("Access-Control-Allow-Origin", origin);
+                    context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
+                    context.Response.Headers.Append("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Signature, X-Provider, X-Requested-With");
+                }
+                
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                // SONNET: También agregar headers CORS en OnChallenge (cuando no hay token)
+                var origin = context.Request.Headers["Origin"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(origin))
+                {
+                    context.Response.Headers.Append("Access-Control-Allow-Origin", origin);
+                    context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
+                    context.Response.Headers.Append("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Signature, X-Provider, X-Requested-With");
+                }
+                
                 return Task.CompletedTask;
             },
             OnTokenValidated = context =>
@@ -158,6 +181,30 @@ builder.Services.AddAuthentication()
                 if (context.Request.Cookies.TryGetValue("pl.token", out var token))
                     context.Token = token;
 
+                return Task.CompletedTask;
+            },
+            OnAuthenticationFailed = context =>
+            {
+                // SONNET: Agregar headers CORS para errores 401
+                var origin = context.Request.Headers["Origin"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(origin))
+                {
+                    context.Response.Headers.Append("Access-Control-Allow-Origin", origin);
+                    context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
+                    context.Response.Headers.Append("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Signature, X-Provider, X-Requested-With");
+                }
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                // SONNET: Agregar headers CORS en OnChallenge
+                var origin = context.Request.Headers["Origin"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(origin))
+                {
+                    context.Response.Headers.Append("Access-Control-Allow-Origin", origin);
+                    context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
+                    context.Response.Headers.Append("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Signature, X-Provider, X-Requested-With");
+                }
                 return Task.CompletedTask;
             }
         };
