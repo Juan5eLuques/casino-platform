@@ -123,7 +123,7 @@ public static class AuthEndpoints
             var cookieOptions = new CookieOptions
             {
                 HttpOnly = true,                 // Cookie no accesible desde JavaScript (seguridad)
-                Secure = httpContext.Request.IsHttps,   // HTTPS obligatorio en producción
+                Secure = true,   // HTTPS obligatorio en producción
                 SameSite = SameSiteMode.None,    // cross-site necesario para dominios diferentes
                 Path = "/",                      // Path "/" para cubrir todas las rutas /api/*
                 // Domain omitido intencionalmente para development (host-only)
@@ -139,18 +139,8 @@ public static class AuthEndpoints
             logger.LogInformation("Successful admin login for user: {UserId} - {Username} - Role: {Role}", 
                 user.Id, user.Username, user.Role);
 
-            // SONNET: Devolver token en body para que el frontend lo guarde (solución cross-site)
-            return Results.Ok(new { 
-                ok = true,
-                token = tokenResponse.AccessToken,
-                expiresAt = tokenResponse.ExpiresAt,
-                user = new {
-                    user.Id,
-                    user.Username,
-                    Role = user.Role.ToString(),
-                    Brand = user.Brand != null ? new { user.Brand.Id, user.Brand.Name, user.Brand.Code } : null
-                }
-            });
+            // Return simple success response - el navegador maneja la cookie automáticamente
+            return Results.Ok(new { ok = true });
         }
         catch (Exception ex)
         {
@@ -251,7 +241,7 @@ public static class AuthEndpoints
                 new CookieOptions
                 {
                     HttpOnly = true,
-                    Secure = httpContext.Request.IsHttps, // Secure only if HTTPS
+                    Secure = true, // Secure only if HTTPS
                     SameSite = SameSiteMode.Lax,
                     Path = "/",
                     Expires = tokenResponse.ExpiresAt
@@ -291,7 +281,7 @@ public static class AuthEndpoints
         { 
             Path = "/",                       // Mismo Path que en login
             SameSite = SameSiteMode.None,     // Mismo SameSite para cross-site
-            Secure = httpContext.Request.IsHttps,  // Mismo Secure que en login
+            Secure = true,  // Mismo Secure que en login
             HttpOnly = true                   // HttpOnly para consistencia
             // Domain omitido intencionalmente para development
         };
