@@ -139,8 +139,18 @@ public static class AuthEndpoints
             logger.LogInformation("Successful admin login for user: {UserId} - {Username} - Role: {Role}", 
                 user.Id, user.Username, user.Role);
 
-            // Return simple success response - el navegador maneja la cookie automáticamente
-            return Results.Ok(new { ok = true });
+            // SONNET: Devolver token en body para que el frontend lo guarde (solución cross-site)
+            return Results.Ok(new { 
+                ok = true,
+                token = tokenResponse.AccessToken,
+                expiresAt = tokenResponse.ExpiresAt,
+                user = new {
+                    user.Id,
+                    user.Username,
+                    Role = user.Role.ToString(),
+                    Brand = user.Brand != null ? new { user.Brand.Id, user.Brand.Name, user.Brand.Code } : null
+                }
+            });
         }
         catch (Exception ex)
         {

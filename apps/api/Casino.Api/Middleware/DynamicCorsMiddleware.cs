@@ -216,6 +216,8 @@ public class DynamicCorsMiddleware
         context.Response.Headers.Append("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Signature, X-Provider, X-Requested-With");
         context.Response.Headers.Append("Access-Control-Allow-Credentials", "true");
         context.Response.Headers.Append("Access-Control-Max-Age", "86400"); // 24 hours
+        // SONNET: Exponer Set-Cookie para que el navegador pueda leer las cookies del backend
+        context.Response.Headers.Append("Access-Control-Expose-Headers", "Set-Cookie");
         
         _logger.LogDebug("CORS headers set for origin: {Origin}", origin);
     }
