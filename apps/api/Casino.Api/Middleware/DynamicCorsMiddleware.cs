@@ -1,4 +1,5 @@
 using Casino.Application.Services;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace Casino.Api.Middleware;
@@ -16,7 +17,7 @@ public class DynamicCorsMiddleware
         _env = env;
     }
 
-    public async Task InvokeAsync(HttpContext context, BrandContext brandContext)
+    public async Task InvokeAsync(HttpContext context, BrandContext brandContext, Infrastructure.Data.CasinoDbContext dbContext)
     {
         var origin = context.Request.Headers.Origin.FirstOrDefault();
         var method = context.Request.Method;
@@ -54,26 +55,42 @@ public class DynamicCorsMiddleware
         // For auth endpoints that don't require brand resolution
         if (path.StartsWith("/api/v1/admin/auth") || path.StartsWith("/api/v1/auth"))
         {
-            _logger.LogInformation("CORS allowed for auth endpoint without brand resolution: {Path}", path);
+            _logger.LogInformation("CORS validation for auth endpoint: {Path} from {Origin}", path, origin);
             
-            // Check if origin is allowed for auth endpoints
-            var isAuthOriginAllowed = IsOriginAllowedForAuth(origin) || 
+            // Check if origin is allowed (development origins or any origin in database)
+            var isDevOriginAllowed = IsOriginAllowedForAuth(origin) || 
                 (_env.IsDevelopment() && IsOriginAllowedForDevelopment(origin));
             
-            if (!isAuthOriginAllowed)
+            if (!isDevOriginAllowed)
             {
-                _logger.LogWarning("CORS origin {Origin} not allowed for auth endpoint", origin);
+                // Check if origin exists in ANY brand's CORS origins in database
+                var brands = await dbContext.Brands
+                    .AsNoTracking()
+                    .Where(b => b.Status == Domain.Enums.BrandStatus.ACTIVE)
+                    .ToListAsync();
                 
-                context.Response.StatusCode = 403;
-                context.Response.ContentType = "application/json";
+                var isOriginInDatabase = brands.Any(b => 
+                    b.CorsOrigins != null && 
+                    b.CorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase));
                 
-                var errorResponse = JsonSerializer.Serialize(new { 
-                    error = "cors_origin_not_allowed", 
-                    origin = origin,
-                    endpoint = "auth"
-                });
-                await context.Response.WriteAsync(errorResponse);
-                return;
+                if (!isOriginInDatabase)
+                {
+                    _logger.LogWarning("CORS origin {Origin} not allowed for auth endpoint (not in development list and not in any active brand)", origin);
+                    
+                    context.Response.StatusCode = 403;
+                    context.Response.ContentType = "application/json";
+                    
+                    var errorResponse = JsonSerializer.Serialize(new { 
+                        error = "cors_origin_not_allowed", 
+                        origin = origin,
+                        endpoint = "auth",
+                        message = "Origin not found in any active brand's CORS origins"
+                    });
+                    await context.Response.WriteAsync(errorResponse);
+                    return;
+                }
+                
+                _logger.LogInformation("CORS origin {Origin} allowed for auth endpoint (found in database)", origin);
             }
 
             SetCorsHeaders(context, origin);
@@ -173,10 +190,9 @@ public class DynamicCorsMiddleware
 
     private bool IsOriginAllowedForAuth(string origin)
     {
-        // SONNET: Common development and production origins that should be allowed
-        var allowedOrigins = new[]
+        // SONNET: Development origins are always allowed for auth endpoints
+        var developmentOrigins = new[]
         {
-            // Local development
             "http://localhost:5173",
             "http://localhost:3000",
             "http://localhost:5000",
@@ -184,12 +200,10 @@ public class DynamicCorsMiddleware
             "http://admin.bet30.local:5173",
             "https://admin.bet30.local:5173",
             "http://bet30.local:5173",
-            "https://bet30.local:5173",
-            // SONNET: Production origins (Netlify)
-            "https://backoffice-casino.netlify.app"
+            "https://bet30.local:5173"
         };
         
-        return allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+        return developmentOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
     }
 
     private bool IsOriginAllowedForDevelopment(string origin)
