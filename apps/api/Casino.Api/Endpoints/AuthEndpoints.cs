@@ -145,7 +145,10 @@ public static class AuthEndpoints
             // Issue JWT con aud = "backoffice" y claims de rol + brand
             var tokenResponse = jwtService.IssueToken("backoffice", claims, TimeSpan.FromHours(8));
 
-            // CRITICAL: Set cookie with brand-specific isolation
+            // CRITICAL: Set cookie with brand-specific NAME to allow multiple sessions
+            // Use brand code in cookie name so each brand has independent cookies
+            var cookieName = $"bk.token.{brandContext.BrandCode.ToLower()}";
+            
             var cookieOptions = new CookieOptions
             {
                 HttpOnly = true,                 // Cookie no accesible desde JavaScript (seguridad)
@@ -188,7 +191,10 @@ public static class AuthEndpoints
                 logger.LogInformation("Setting cookie domain to: {Domain}", host);
             }
             
-            httpContext.Response.Cookies.Append("bk.token", tokenResponse.AccessToken, cookieOptions);
+            // Use brand-specific cookie name
+            httpContext.Response.Cookies.Append(cookieName, tokenResponse.AccessToken, cookieOptions);
+            
+            logger.LogInformation("Cookie set: {CookieName} for brand {BrandCode}", cookieName, brandContext.BrandCode);
 
             // Update last login
             user.LastLoginAt = DateTime.UtcNow;
@@ -345,8 +351,11 @@ public static class AuthEndpoints
         }
     }
 
-    public static IResult AdminLogout(HttpContext httpContext)
+    public static IResult AdminLogout(HttpContext httpContext, BrandContext brandContext)
     {
+        // CRITICAL: Use brand-specific cookie name (same as login)
+        var cookieName = $"bk.token.{brandContext.BrandCode.ToLower()}";
+        
         // CRITICAL: Match cookie options with login for proper deletion
         var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
         var host = httpContext.Request.Host.Host;
@@ -370,7 +379,7 @@ public static class AuthEndpoints
             cookieOptions.Domain = host;
         }
         
-        httpContext.Response.Cookies.Delete("bk.token", cookieOptions);
+        httpContext.Response.Cookies.Delete(cookieName, cookieOptions);
         return Results.Ok(new { ok = true, message = "Logged out successfully" });
     }
 

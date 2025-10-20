@@ -109,10 +109,15 @@ builder.Services.AddAuthentication()
                     return Task.CompletedTask;
                 }
                 
-                // 2) Fallback: leer desde cookie bk.token
-                if (context.Request.Cookies.TryGetValue("bk.token", out var cookieToken))
+                // 2) Fallback: buscar cookies que empiecen con "bk.token."
+                // Buscar cualquier cookie que comience con el prefijo de brand
+                foreach (var cookie in context.Request.Cookies)
                 {
-                    context.Token = cookieToken;
+                    if (cookie.Key.StartsWith("bk.token.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Token = cookie.Value;
+                        break;
+                    }
                 }
 
                 return Task.CompletedTask;
