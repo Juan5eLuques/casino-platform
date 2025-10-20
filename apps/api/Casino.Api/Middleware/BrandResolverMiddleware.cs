@@ -87,14 +87,32 @@ public class BrandResolverMiddleware
                 _logger.LogWarning("Brand not resolved for host: {Host} (full: {FullHost}). Available brands: {AvailableBrands}", 
                     host, fullHost, string.Join(", ", availableBrands));
                 
-                // CRITICAL: In development with localhost, do NOT use a default brand
-                // This would bypass brand validation in login
-                // Instead, return error to force proper brand configuration
+                // SPECIAL CASE: For localhost in development, try to resolve LOCALHOST_DEV brand
                 if (_env.IsDevelopment() && (host.Contains("localhost") || host.Contains("127.0.0.1")))
                 {
-                    _logger.LogWarning(
-                        "Development mode: localhost detected but NO default brand will be used. " +
-                        "Configure /etc/hosts with brand domains (e.g., sitea.local, siteb.local) or use production domains.");
+                    _logger.LogInformation("Development mode: localhost detected, trying LOCALHOST_DEV brand");
+                    
+                    // Try to get the LOCALHOST_DEV brand specifically
+                    brand = await dbContext.Brands
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(b => b.Code == "LOCALHOST_DEV" && b.Status == Domain.Enums.BrandStatus.ACTIVE);
+                    
+                    if (brand != null)
+                    {
+                        _logger.LogInformation("Development mode: using LOCALHOST_DEV brand for localhost");
+                        // Set brand context with LOCALHOST_DEV
+                        brandContext.BrandId = brand.Id;
+                        brandContext.BrandCode = brand.Code;
+                        brandContext.Domain = fullHost; // Keep actual host
+                        brandContext.CorsOrigins = brand.CorsOrigins ?? new string[0];
+                        
+                        await _next(context);
+                        return;
+                    }
+                    else
+                    {
+                        _logger.LogError("Development mode: LOCALHOST_DEV brand not found in database. Please create it.");
+                    }
                 }
                 
                 context.Response.StatusCode = 400;
@@ -108,7 +126,7 @@ public class BrandResolverMiddleware
                         .ToListAsync(),
                     message = "No brand found for this host. Please configure the brand domain in the database or use a configured domain.",
                     hint_localhost = _env.IsDevelopment() 
-                        ? "For localhost development, configure /etc/hosts (Linux/Mac) or C:\\Windows\\System32\\drivers\\etc\\hosts (Windows) with brand domains like '127.0.0.1 sitea.local'"
+                        ? "For localhost development: 1) Create LOCALHOST_DEV brand in database, OR 2) Configure /etc/hosts with brand domains like '127.0.0.1 sitea.local'"
                         : null
                 });
                 await context.Response.WriteAsync(errorResponse);
