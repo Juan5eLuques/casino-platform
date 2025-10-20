@@ -86,35 +86,43 @@ public class BrandResolverMiddleware
                     
                 _logger.LogWarning("Brand not resolved for host: {Host} (full: {FullHost}). Available brands: {AvailableBrands}", 
                     host, fullHost, string.Join(", ", availableBrands));
-                
+
                 // SPECIAL CASE: For localhost in development, try to resolve LOCALHOST_DEV brand
                 if (_env.IsDevelopment() && (host.Contains("localhost") || host.Contains("127.0.0.1")))
                 {
-                    _logger.LogInformation("Development mode: localhost detected, trying LOCALHOST_DEV brand");
-                    
-                    // Try to get the LOCALHOST_DEV brand specifically
+                    _logger.LogInformation("Development mode: using default brand for {Host}", host);
+
+                    // Try to get the LOCALHOST_DEV brand first
                     brand = await dbContext.Brands
                         .AsNoTracking()
                         .FirstOrDefaultAsync(b => b.Code == "LOCALHOST_DEV" && b.Status == Domain.Enums.BrandStatus.ACTIVE);
-                    
+
+                    if (brand == null)
+                    {
+                        // If LOCALHOST_DEV doesn't exist, try any active brand
+                        brand = await dbContext.Brands
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync(b => b.Status == Domain.Enums.BrandStatus.ACTIVE);
+                    }
+
                     if (brand != null)
                     {
-                        _logger.LogInformation("Development mode: using LOCALHOST_DEV brand for localhost");
-                        // Set brand context with LOCALHOST_DEV
+                        _logger.LogInformation("Development mode: using brand {BrandCode} as default for localhost", brand.Code);
+                        // Set brand context with the default brand
                         brandContext.BrandId = brand.Id;
                         brandContext.BrandCode = brand.Code;
                         brandContext.Domain = fullHost; // Keep actual host
                         brandContext.CorsOrigins = brand.CorsOrigins ?? new string[0];
-                        
+
                         await _next(context);
                         return;
                     }
                     else
                     {
-                        _logger.LogError("Development mode: LOCALHOST_DEV brand not found in database. Please create it.");
+                        _logger.LogError("Development mode: no active brands found in database");
                     }
                 }
-                
+
                 context.Response.StatusCode = 400;
                 context.Response.ContentType = "application/json";
                 
