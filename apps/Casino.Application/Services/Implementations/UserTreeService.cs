@@ -9,6 +9,7 @@ namespace Casino.Application.Services.Implementations;
 /// <summary>
 /// Servicio para gestionar el árbol genealógico de usuarios
 /// Permite ver qué usuarios fueron creados por otros usuarios de forma jerárquica
+/// OPTIMIZADO: Carga todos los datos necesarios en 2 queries (BackofficeUsers + Players)
 /// </summary>
 public class UserTreeService : IUserTreeService
 {
@@ -28,6 +29,7 @@ public class UserTreeService : IUserTreeService
         Guid currentUserId,
         BackofficeUserRole currentRole)
     {
+        var startTime = DateTime.UtcNow;
         _logger.LogInformation("Getting user tree for userId: {UserId}, MaxDepth: {MaxDepth}, CurrentUser: {CurrentUserId}, Role: {Role}",
             userId, request.MaxDepth, currentUserId, currentRole);
 
@@ -46,7 +48,13 @@ public class UserTreeService : IUserTreeService
                 throw new InvalidOperationException("Access denied: User not in your scope");
             }
 
-            var rootNode = await BuildUserTreeNodeAsync(userId, "BACKOFFICE", request, 0);
+            // OPTIMIZACIÓN: Cargar TODOS los datos necesarios de una vez
+            var allData = await LoadAllTreeDataAsync(userId, request, request.MaxDepth);
+            
+            var rootNode = BuildUserTreeNodeFromCache(userId, "BACKOFFICE", request, 0, allData);
+
+            var elapsed = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _logger.LogInformation("User tree loaded in {ElapsedMs}ms", elapsed);
 
             return new GetUserTreeResponse(
                 backofficeUser.Id,
@@ -71,7 +79,13 @@ public class UserTreeService : IUserTreeService
                 throw new InvalidOperationException("Access denied: Player not in your scope");
             }
 
-            var rootNode = await BuildUserTreeNodeAsync(userId, "PLAYER", request, 0);
+            // OPTIMIZACIÓN: Cargar TODOS los datos necesarios de una vez
+            var allData = await LoadAllTreeDataAsync(userId, request, request.MaxDepth);
+            
+            var rootNode = BuildUserTreeNodeFromCache(userId, "PLAYER", request, 0, allData);
+
+            var elapsed = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _logger.LogInformation("User tree loaded in {ElapsedMs}ms", elapsed);
 
             return new GetUserTreeResponse(
                 player.Id,
@@ -87,67 +101,168 @@ public class UserTreeService : IUserTreeService
     }
 
     /// <summary>
-    /// Construye recursivamente un nodo del árbol con sus hijos
+    /// OPTIMIZACIÓN: Carga TODOS los datos del árbol en 2 queries
+    /// Esto elimina el problema de N+1 queries
     /// </summary>
-    private async Task<UserTreeNode> BuildUserTreeNodeAsync(
+    private async Task<TreeDataCache> LoadAllTreeDataAsync(
+        Guid rootUserId,
+        GetUserTreeRequest request,
+        int maxDepth)
+    {
+        var cache = new TreeDataCache();
+
+        // IMPORTANTE: Cargar el usuario raíz primero
+        var rootBackofficeUser = await _context.BackofficeUsers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == rootUserId);
+
+        if (rootBackofficeUser != null)
+        {
+            cache.BackofficeUsers[rootUserId] = rootBackofficeUser;
+        }
+        else
+        {
+            var rootPlayer = await _context.Players
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == rootUserId);
+
+            if (rootPlayer != null)
+            {
+                cache.Players[rootUserId] = rootPlayer;
+            }
+        }
+
+        // Cargar TODOS los usuarios necesarios recursivamente
+        await LoadUsersRecursivelyAsync(new[] { rootUserId }, request, maxDepth, 0, cache);
+
+        _logger.LogInformation("Loaded {BackofficeCount} backoffice users and {PlayerCount} players for tree",
+            cache.BackofficeUsers.Count, cache.Players.Count);
+
+        return cache;
+    }
+
+    /// <summary>
+    /// Carga recursivamente todos los usuarios hasta la profundidad máxima
+    /// </summary>
+    private async Task LoadUsersRecursivelyAsync(
+        IEnumerable<Guid> parentIds,
+        GetUserTreeRequest request,
+        int maxDepth,
+        int currentDepth,
+        TreeDataCache cache)
+    {
+        if (currentDepth > maxDepth || !parentIds.Any())
+            return;
+
+        var parentIdsList = parentIds.ToList();
+
+        // Cargar BackofficeUsers hijos de estos padres
+        var backofficeChildren = await _context.BackofficeUsers
+            .AsNoTracking()
+            .Where(u => parentIdsList.Contains(u.CreatedByUserId!.Value))
+            .Where(u => request.IncludeInactive || u.Status == BackofficeUserStatus.ACTIVE)
+            .ToListAsync();
+
+        foreach (var user in backofficeChildren)
+        {
+            if (!cache.BackofficeUsers.ContainsKey(user.Id))
+            {
+                cache.BackofficeUsers[user.Id] = user;
+            }
+        }
+
+        // Cargar Players hijos de estos padres
+        var playerChildren = await _context.Players
+            .AsNoTracking()
+            .Where(p => parentIdsList.Contains(p.CreatedByUserId!.Value))
+            .Where(p => request.IncludeInactive || p.Status == PlayerStatus.ACTIVE)
+            .ToListAsync();
+
+        foreach (var player in playerChildren)
+        {
+            if (!cache.Players.ContainsKey(player.Id))
+            {
+                cache.Players[player.Id] = player;
+            }
+        }
+
+        // Cargar siguiente nivel
+        var nextLevelIds = backofficeChildren.Select(u => u.Id)
+            .Concat(playerChildren.Select(p => p.Id))
+            .ToList();
+
+        if (nextLevelIds.Any() && currentDepth < maxDepth)
+        {
+            await LoadUsersRecursivelyAsync(nextLevelIds, request, maxDepth, currentDepth + 1, cache);
+        }
+    }
+
+    /// <summary>
+    /// Construye el nodo del árbol usando datos pre-cargados (sin queries adicionales)
+    /// </summary>
+    private UserTreeNode BuildUserTreeNodeFromCache(
         Guid userId,
         string userType,
         GetUserTreeRequest request,
-        int currentDepth)
+        int currentDepth,
+        TreeDataCache cache)
     {
-        // Obtener información del usuario
+        // Obtener información del usuario desde cache
         string username;
         string? role = null;
         string status;
         DateTime createdAt;
+        decimal balance = 0;
+        decimal? commissionPercent = null;
 
         if (userType == "BACKOFFICE")
         {
-            var user = await _context.BackofficeUsers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(u => u.Id == userId);
-
+            var user = cache.BackofficeUsers.GetValueOrDefault(userId);
             if (user == null)
-                throw new InvalidOperationException($"BackofficeUser {userId} not found");
+                throw new InvalidOperationException($"BackofficeUser {userId} not found in cache");
 
             username = user.Username;
             role = user.Role.ToString();
             status = user.Status.ToString();
             createdAt = user.CreatedAt;
+            balance = user.WalletBalance;
+            
+            if (user.Role == BackofficeUserRole.CASHIER && user.ParentCashierId.HasValue)
+            {
+                commissionPercent = user.CommissionPercent;
+            }
         }
         else // PLAYER
         {
-            var player = await _context.Players
-                .AsNoTracking()
-                .FirstOrDefaultAsync(p => p.Id == userId);
-
+            var player = cache.Players.GetValueOrDefault(userId);
             if (player == null)
-                throw new InvalidOperationException($"Player {userId} not found");
+                throw new InvalidOperationException($"Player {userId} not found in cache");
 
             username = player.Username;
             status = player.Status.ToString();
             createdAt = player.CreatedAt;
+            balance = player.WalletBalance;
         }
 
-        // Contar hijos directos (usuarios creados por este usuario)
-        var backofficeChildrenCount = await _context.BackofficeUsers
+        // Contar y obtener hijos desde cache (sin queries)
+        var backofficeChildren = cache.BackofficeUsers.Values
             .Where(u => u.CreatedByUserId == userId)
-            .Where(u => request.IncludeInactive || u.Status == BackofficeUserStatus.ACTIVE)
-            .CountAsync();
+            .OrderBy(u => u.CreatedAt)
+            .ToList();
 
-        var playerChildrenCount = await _context.Players
+        var playerChildren = cache.Players.Values
             .Where(p => p.CreatedByUserId == userId)
-            .Where(p => request.IncludeInactive || p.Status == PlayerStatus.ACTIVE)
-            .CountAsync();
+            .OrderBy(p => p.CreatedAt)
+            .ToList();
 
-        int totalChildrenCount = backofficeChildrenCount + playerChildrenCount;
+        int totalChildrenCount = backofficeChildren.Count + playerChildren.Count;
         bool hasChildren = totalChildrenCount > 0;
 
-        // Si ya alcanzamos la profundidad máxima, no cargar hijos
+        // Cargar hijos si no alcanzamos la profundidad máxima
         IEnumerable<UserTreeNode>? children = null;
         if (currentDepth < request.MaxDepth && hasChildren)
         {
-            children = await LoadChildrenAsync(userId, request, currentDepth + 1);
+            children = LoadChildrenFromCache(userId, request, currentDepth + 1, cache);
         }
 
         return new UserTreeNode(
@@ -157,52 +272,58 @@ public class UserTreeService : IUserTreeService
             role,
             status,
             createdAt,
+            balance,
+            commissionPercent,
             hasChildren,
             totalChildrenCount,
             children);
     }
 
     /// <summary>
-    /// Carga los hijos directos de un usuario
+    /// Carga los hijos desde el cache (sin queries adicionales)
     /// </summary>
-    private async Task<List<UserTreeNode>> LoadChildrenAsync(
+    private List<UserTreeNode> LoadChildrenFromCache(
         Guid parentUserId,
         GetUserTreeRequest request,
-        int currentDepth)
+        int currentDepth,
+        TreeDataCache cache)
     {
         var children = new List<UserTreeNode>();
 
-        // Cargar hijos de tipo BackofficeUser
-        var backofficeChildren = await _context.BackofficeUsers
-            .AsNoTracking()
+        // Obtener hijos BackofficeUser desde cache
+        var backofficeChildren = cache.BackofficeUsers.Values
             .Where(u => u.CreatedByUserId == parentUserId)
-            .Where(u => request.IncludeInactive || u.Status == BackofficeUserStatus.ACTIVE)
             .OrderBy(u => u.CreatedAt)
-            .ToListAsync();
+            .ToList();
 
         foreach (var child in backofficeChildren)
         {
-            var childNode = await BuildUserTreeNodeAsync(child.Id, "BACKOFFICE", request, currentDepth);
+            var childNode = BuildUserTreeNodeFromCache(child.Id, "BACKOFFICE", request, currentDepth, cache);
             children.Add(childNode);
         }
 
-        // Cargar hijos de tipo Player
-        var playerChildren = await _context.Players
-            .AsNoTracking()
+        // Obtener hijos Player desde cache
+        var playerChildren = cache.Players.Values
             .Where(p => p.CreatedByUserId == parentUserId)
-            .Where(p => request.IncludeInactive || p.Status == PlayerStatus.ACTIVE)
             .OrderBy(p => p.CreatedAt)
-            .ToListAsync();
+            .ToList();
 
         foreach (var child in playerChildren)
         {
-            var childNode = await BuildUserTreeNodeAsync(child.Id, "PLAYER", request, currentDepth);
+            var childNode = BuildUserTreeNodeFromCache(child.Id, "PLAYER", request, currentDepth, cache);
             children.Add(childNode);
         }
 
-        _logger.LogDebug("Loaded {Count} children for user {ParentUserId} at depth {Depth}",
-            children.Count, parentUserId, currentDepth);
-
         return children;
     }
+
+    /// <summary>
+    /// Cache de datos cargados para evitar N+1 queries
+    /// </summary>
+    private class TreeDataCache
+    {
+        public Dictionary<Guid, Domain.Entities.BackofficeUser> BackofficeUsers { get; } = new();
+        public Dictionary<Guid, Domain.Entities.Player> Players { get; } = new();
+    }
 }
+

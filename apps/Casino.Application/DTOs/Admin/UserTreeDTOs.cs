@@ -21,6 +21,8 @@ public record UserTreeNode(
     string? Role, // Rol si es backoffice
     string Status,
     DateTime CreatedAt,
+    decimal Balance, // Balance actual del usuario (WalletBalance)
+    decimal? CommissionPercent, // Comisión (solo para CASHIER con ParentCashierId)
     bool HasChildren, // TRUE si este usuario tiene hijos (creó otros usuarios)
     int DirectChildrenCount, // Cantidad de hijos directos
     IEnumerable<UserTreeNode>? Children // Puede ser null si no se cargaron los hijos aún
