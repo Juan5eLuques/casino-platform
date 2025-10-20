@@ -150,14 +150,37 @@ public static class AuthEndpoints
             {
                 HttpOnly = true,                 // Cookie no accesible desde JavaScript (seguridad)
                 Secure = true,                   // HTTPS obligatorio en producción
-                SameSite = SameSiteMode.Lax,     // CHANGED: Lax instead of None for better isolation
                 Path = "/",                      // Path "/" para cubrir todas las rutas /api/*
                 Expires = DateTimeOffset.UtcNow.AddHours(8)
             };
 
+            // CRITICAL: Configure SameSite based on environment
+            var host = httpContext.Request.Host.Host;
+            var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
+            
+            // Check if frontend is on different domain (cross-site scenario)
+            bool isCrossSite = !string.IsNullOrEmpty(origin) && 
+                              !origin.Contains(host) && 
+                              !host.Contains("localhost") && 
+                              !host.StartsWith("127.0.0.1");
+
+            if (isCrossSite)
+            {
+                // Cross-site scenario (e.g., netlify.app → railway.app)
+                // MUST use SameSite=None to allow cross-site cookies
+                cookieOptions.SameSite = SameSiteMode.None;
+                logger.LogInformation("Cross-site detected: Origin={Origin}, Host={Host} → Using SameSite=None", 
+                    origin, host);
+            }
+            else
+            {
+                // Same-site or localhost → use Lax for better security
+                cookieOptions.SameSite = SameSiteMode.Lax;
+                logger.LogInformation("Same-site or localhost detected → Using SameSite=Lax");
+            }
+
             // OPTIONAL: Set Domain for production multi-brand isolation
             // Only set if not localhost (development)
-            var host = httpContext.Request.Host.Host;
             if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
             {
                 // Set cookie domain to current host for isolation
@@ -324,15 +347,28 @@ public static class AuthEndpoints
 
     public static IResult AdminLogout(HttpContext httpContext)
     {
-        // Borrar cookie bk.token con mismas opciones que el login (Path/Domain/SameSite)
+        // CRITICAL: Match cookie options with login for proper deletion
+        var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
+        var host = httpContext.Request.Host.Host;
+        
+        bool isCrossSite = !string.IsNullOrEmpty(origin) && 
+                          !origin.Contains(host) && 
+                          !host.Contains("localhost") && 
+                          !host.StartsWith("127.0.0.1");
+
         var cookieOptions = new CookieOptions 
         { 
-            Path = "/",                       // Mismo Path que en login
-            SameSite = SameSiteMode.None,     // Mismo SameSite para cross-site
-            Secure = true,  // Mismo Secure que en login
-            HttpOnly = true                   // HttpOnly para consistencia
-            // Domain omitido intencionalmente para development
+            Path = "/",
+            Secure = true,
+            HttpOnly = true,
+            SameSite = isCrossSite ? SameSiteMode.None : SameSiteMode.Lax
         };
+
+        // Set domain if not localhost
+        if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
+        {
+            cookieOptions.Domain = host;
+        }
         
         httpContext.Response.Cookies.Delete("bk.token", cookieOptions);
         return Results.Ok(new { ok = true, message = "Logged out successfully" });
