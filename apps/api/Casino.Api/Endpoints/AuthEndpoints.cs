@@ -47,6 +47,7 @@ public static class AuthEndpoints
     public static async Task<IResult> AdminLogin(
         [FromBody] AdminLoginRequest request,
         CasinoDbContext db,
+        BrandContext brandContext,
         IJwtService jwtService,
         IPasswordService passwordService,
         HttpContext httpContext,
@@ -68,13 +69,25 @@ public static class AuthEndpoints
                     statusCode: 500);
             }
 
-            logger.LogInformation("Admin login attempt for username: {Username}", request.Username);
+            logger.LogInformation("Admin login attempt for username: {Username} on host: {Host}", 
+                request.Username, httpContext.Request.Host.Host);
 
             // Validate input
             if (string.IsNullOrEmpty(request.Username) || string.IsNullOrEmpty(request.Password))
             {
                 logger.LogWarning("Admin login attempt with empty credentials");
                 return Results.Unauthorized();
+            }
+
+            // CRITICAL: Validate brand context is resolved
+            if (!brandContext.IsResolved)
+            {
+                logger.LogWarning("Admin login attempted without resolved brand context on host: {Host}", 
+                    httpContext.Request.Host.Host);
+                return Results.Problem(
+                    title: "Brand Not Resolved",
+                    detail: "Cannot login without a valid brand context. Ensure you're accessing from a configured domain.",
+                    statusCode: 400);
             }
 
             // Find user
@@ -86,6 +99,22 @@ public static class AuthEndpoints
             {
                 logger.LogWarning("Admin login failed: user not found or inactive for username: {Username}", request.Username);
                 return Results.Unauthorized();
+            }
+
+            // CRITICAL: Validate user belongs to the current brand
+            // Only SUPER_ADMIN can login from any brand
+            if (user.Role != BackofficeUserRole.SUPER_ADMIN)
+            {
+                if (!user.BrandId.HasValue || user.BrandId.Value != brandContext.BrandId)
+                {
+                    logger.LogWarning(
+                        "Admin login failed: user {Username} (BrandId: {UserBrandId}) attempted login on different brand {CurrentBrandId} ({CurrentBrandCode})",
+                        request.Username, user.BrandId, brandContext.BrandId, brandContext.BrandCode);
+                    return Results.Problem(
+                        title: "Brand Mismatch",
+                        detail: "This user account is not authorized for this brand/site.",
+                        statusCode: 403);
+                }
             }
 
             // Check password hash
@@ -107,28 +136,34 @@ public static class AuthEndpoints
             {
                 new(ClaimTypes.NameIdentifier, user.Id.ToString()),
                 new(ClaimTypes.Name, user.Username),
-                new(ClaimTypes.Role, user.Role.ToString())
+                new(ClaimTypes.Role, user.Role.ToString()),
+                // CRITICAL: Always include current brand in token
+                new("brand_id", brandContext.BrandId.ToString()),
+                new("brand_code", brandContext.BrandCode)
             };
 
-            // Add brand claim if user has a brand assigned
-            if (user.BrandId.HasValue)
-            {
-                claims.Add(new("brand_id", user.BrandId.Value.ToString()));
-            }
-
-            // Issue JWT con aud = "backoffice" y claims de rol
+            // Issue JWT con aud = "backoffice" y claims de rol + brand
             var tokenResponse = jwtService.IssueToken("backoffice", claims, TimeSpan.FromHours(8));
 
-            // Setear cookie HttpOnly para funcionar cross-site (front en :5173 y API en :7182)
+            // CRITICAL: Set cookie with brand-specific isolation
             var cookieOptions = new CookieOptions
             {
                 HttpOnly = true,                 // Cookie no accesible desde JavaScript (seguridad)
-                Secure = true,   // HTTPS obligatorio en producción
-                SameSite = SameSiteMode.None,    // cross-site necesario para dominios diferentes
+                Secure = true,                   // HTTPS obligatorio en producción
+                SameSite = SameSiteMode.Lax,     // CHANGED: Lax instead of None for better isolation
                 Path = "/",                      // Path "/" para cubrir todas las rutas /api/*
-                // Domain omitido intencionalmente para development (host-only)
                 Expires = DateTimeOffset.UtcNow.AddHours(8)
             };
+
+            // OPTIONAL: Set Domain for production multi-brand isolation
+            // Only set if not localhost (development)
+            var host = httpContext.Request.Host.Host;
+            if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
+            {
+                // Set cookie domain to current host for isolation
+                cookieOptions.Domain = host;
+                logger.LogInformation("Setting cookie domain to: {Domain}", host);
+            }
             
             httpContext.Response.Cookies.Append("bk.token", tokenResponse.AccessToken, cookieOptions);
 
@@ -136,11 +171,24 @@ public static class AuthEndpoints
             user.LastLoginAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
 
-            logger.LogInformation("Successful admin login for user: {UserId} - {Username} - Role: {Role}", 
-                user.Id, user.Username, user.Role);
+            logger.LogInformation(
+                "✅ Successful admin login - User: {UserId} ({Username}) - Role: {Role} - Brand: {BrandCode} ({BrandId})", 
+                user.Id, user.Username, user.Role, brandContext.BrandCode, brandContext.BrandId);
 
-            // Return simple success response - el navegador maneja la cookie automáticamente
-            return Results.Ok(new { ok = true });
+            // Return success response with brand info
+            return Results.Ok(new { 
+                ok = true, 
+                user = new { 
+                    user.Id, 
+                    user.Username, 
+                    Role = user.Role.ToString() 
+                },
+                brand = new {
+                    brandContext.BrandId,
+                    brandContext.BrandCode,
+                    brandContext.Domain
+                }
+            });
         }
         catch (Exception ex)
         {
