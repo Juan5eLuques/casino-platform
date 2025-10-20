@@ -200,7 +200,10 @@ public class DynamicCorsMiddleware
             "http://admin.bet30.local:5173",
             "https://admin.bet30.local:5173",
             "http://bet30.local:5173",
-            "https://bet30.local:5173"
+            "https://bet30.local:5173",
+            // TEMPORARY: Production origins while database is being configured
+            "https://backoffice-casino.netlify.app",
+            "https://bet30-backoffice.netlify.app"
         };
         
         return developmentOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);

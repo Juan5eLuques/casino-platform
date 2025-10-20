@@ -51,6 +51,9 @@ builder.Services.AddScoped<ICashierPlayerService, CashierPlayerService>();
 // SONNET: Unified user service - RESTAURA funcionalidad original de /users
 builder.Services.AddScoped<IUnifiedUserService, UnifiedUserService>();
 
+// SONNET: User tree service - árbol genealógico de usuarios
+builder.Services.AddScoped<IUserTreeService, UserTreeService>();
+
 // SONNET: Wallet services - UNIFIED SYSTEM
 // Unified wallet service for gateway/games (uses Player.WalletBalance + WalletTransactions)
 builder.Services.AddScoped<IWalletService, UnifiedWalletService>();
@@ -410,6 +413,9 @@ adminGroup.MapBrandGameEndpoints();
 
 // SONNET: UNIFIED USER ENDPOINTS - Restaura funcionalidad original de /users
 adminGroup.MapUnifiedUserEndpoints();
+
+// SONNET: USER TREE ENDPOINTS - Árbol genealógico de usuarios
+adminGroup.MapUserTreeEndpoints();
 
 // SONNET: DEPRECATED - Endpoints específicos por tipo de usuario (comentados para evitar duplicación)
 // adminGroup.MapBrandOnlyBackofficeUserEndpoints();
