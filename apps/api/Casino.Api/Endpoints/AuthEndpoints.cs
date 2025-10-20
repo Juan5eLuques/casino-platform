@@ -157,7 +157,7 @@ public static class AuthEndpoints
                 Expires = DateTimeOffset.UtcNow.AddHours(8)
             };
 
-            // CRITICAL: Configure SameSite based on environment
+            // CRITICAL: Configure SameSite and Domain based on environment
             var host = httpContext.Request.Host.Host;
             var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
             
@@ -172,23 +172,27 @@ public static class AuthEndpoints
                 // Cross-site scenario (e.g., netlify.app → railway.app)
                 // MUST use SameSite=None to allow cross-site cookies
                 cookieOptions.SameSite = SameSiteMode.None;
-                logger.LogInformation("Cross-site detected: Origin={Origin}, Host={Host} → Using SameSite=None", 
+                // CRITICAL: DO NOT set Domain for cross-site (host-only cookie)
+                logger.LogInformation("Cross-site detected: Origin={Origin}, Host={Host} → Using SameSite=None, NO Domain", 
                     origin, host);
             }
             else
             {
                 // Same-site or localhost → use Lax for better security
                 cookieOptions.SameSite = SameSiteMode.Lax;
-                logger.LogInformation("Same-site or localhost detected → Using SameSite=Lax");
-            }
-
-            // OPTIONAL: Set Domain for production multi-brand isolation
-            // Only set if not localhost (development)
-            if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
-            {
-                // Set cookie domain to current host for isolation
-                cookieOptions.Domain = host;
-                logger.LogInformation("Setting cookie domain to: {Domain}", host);
+                
+                // For same-site, we can optionally set domain for subdomain sharing
+                // But only if not localhost
+                if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
+                {
+                    // Same-site: can set domain to current host
+                    cookieOptions.Domain = host;
+                    logger.LogInformation("Same-site: Using SameSite=Lax, Domain={Domain}", host);
+                }
+                else
+                {
+                    logger.LogInformation("Localhost: Using SameSite=Lax, NO Domain");
+                }
             }
             
             // Use brand-specific cookie name
@@ -373,8 +377,8 @@ public static class AuthEndpoints
             SameSite = isCrossSite ? SameSiteMode.None : SameSiteMode.Lax
         };
 
-        // Set domain if not localhost
-        if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
+        // CRITICAL: Only set domain for same-site (NOT for cross-site)
+        if (!isCrossSite && !host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
         {
             cookieOptions.Domain = host;
         }
