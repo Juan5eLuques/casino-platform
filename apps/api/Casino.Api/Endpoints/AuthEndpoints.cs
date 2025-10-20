@@ -161,9 +161,26 @@ public static class AuthEndpoints
             var host = httpContext.Request.Host.Host;
             var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
             
+            // Parse origin to get just the hostname
+            string? originHost = null;
+            if (!string.IsNullOrEmpty(origin))
+            {
+                try
+                {
+                    var originUri = new Uri(origin);
+                    originHost = originUri.Host;
+                }
+                catch
+                {
+                    // Invalid origin, treat as cross-site for safety
+                    originHost = null;
+                }
+            }
+            
             // Check if frontend is on different domain (cross-site scenario)
-            bool isCrossSite = !string.IsNullOrEmpty(origin) && 
-                              !origin.Contains(host) && 
+            // Compare the EXACT hostnames (not contains, which can give false positives)
+            bool isCrossSite = !string.IsNullOrEmpty(originHost) && 
+                              originHost != host && 
                               !host.Contains("localhost") && 
                               !host.StartsWith("127.0.0.1");
 
@@ -173,8 +190,8 @@ public static class AuthEndpoints
                 // MUST use SameSite=None to allow cross-site cookies
                 cookieOptions.SameSite = SameSiteMode.None;
                 // CRITICAL: DO NOT set Domain for cross-site (host-only cookie)
-                logger.LogInformation("Cross-site detected: Origin={Origin}, Host={Host} → Using SameSite=None, NO Domain", 
-                    origin, host);
+                logger.LogInformation("Cross-site detected: OriginHost={OriginHost}, BackendHost={Host} → Using SameSite=None, NO Domain", 
+                    originHost, host);
             }
             else
             {
@@ -187,7 +204,8 @@ public static class AuthEndpoints
                 {
                     // Same-site: can set domain to current host
                     cookieOptions.Domain = host;
-                    logger.LogInformation("Same-site: Using SameSite=Lax, Domain={Domain}", host);
+                    logger.LogInformation("Same-site: OriginHost={OriginHost}, BackendHost={Host} → Using SameSite=Lax, Domain={Domain}", 
+                        originHost ?? "unknown", host, host);
                 }
                 else
                 {
@@ -364,8 +382,24 @@ public static class AuthEndpoints
         var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
         var host = httpContext.Request.Host.Host;
         
-        bool isCrossSite = !string.IsNullOrEmpty(origin) && 
-                          !origin.Contains(host) && 
+        // Parse origin to get just the hostname
+        string? originHost = null;
+        if (!string.IsNullOrEmpty(origin))
+        {
+            try
+            {
+                var originUri = new Uri(origin);
+                originHost = originUri.Host;
+            }
+            catch
+            {
+                originHost = null;
+            }
+        }
+        
+        // Check if cross-site (EXACT hostname comparison)
+        bool isCrossSite = !string.IsNullOrEmpty(originHost) && 
+                          originHost != host && 
                           !host.Contains("localhost") && 
                           !host.StartsWith("127.0.0.1");
 
