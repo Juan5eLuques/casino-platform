@@ -318,12 +318,23 @@ public static class AuthEndpoints
     {
         var logger = loggerFactory.CreateLogger("AuthEndpoints");
         
-        // CRITICAL: Use CookieHelper for consistent cookie handling
-        // This ensures logout uses identical options as login
-        var cookieName = Casino.Infrastructure.Helpers.CookieHelper.GetBackofficeCookieName(brandContext.BrandCode);
+        // CRITICAL: Extract brand_code from JWT token instead of BrandContext
+        // BrandResolver skips logout endpoints, so BrandContext may not be populated
+        var brandCodeClaim = httpContext.User.FindFirst("brand_code")?.Value;
         
-        logger.LogInformation("Logout attempt for brand {BrandCode}, cookie: {CookieName}", 
-            brandContext.BrandCode, cookieName);
+        if (string.IsNullOrWhiteSpace(brandCodeClaim))
+        {
+            logger.LogError("Logout failed: brand_code claim not found in JWT token");
+            return Results.Problem(
+                title: "Invalid Token",
+                detail: "Brand code not found in authentication token",
+                statusCode: 401);
+        }
+        
+        logger.LogInformation("Logout attempt for brand {BrandCode}", brandCodeClaim);
+        
+        // Use brand_code from token to get cookie name
+        var cookieName = Casino.Infrastructure.Helpers.CookieHelper.GetBackofficeCookieName(brandCodeClaim);
         
         // Delete auth cookie using centralized helper
         Casino.Infrastructure.Helpers.CookieHelper.DeleteAuthCookie(httpContext, cookieName, logger);
@@ -333,7 +344,7 @@ public static class AuthEndpoints
         
         logger.LogInformation(
             "Logout completed for brand {BrandCode}, cookie {CookieName} was present: {Present}",
-            brandContext.BrandCode, cookieName, cookieWasPresent);
+            brandCodeClaim, cookieName, cookieWasPresent);
         
         return Results.Ok(new 
         { 
