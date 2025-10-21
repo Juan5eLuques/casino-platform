@@ -55,7 +55,7 @@ public static class AuthEndpoints
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("AuthEndpoints");
-        
+
         try
         {
             // Validate configuration first
@@ -69,7 +69,7 @@ public static class AuthEndpoints
                     statusCode: 500);
             }
 
-            logger.LogInformation("Admin login attempt for username: {Username} on host: {Host}", 
+            logger.LogInformation("Admin login attempt for username: {Username} on host: {Host}",
                 request.Username, httpContext.Request.Host.Host);
 
             // Validate input
@@ -82,7 +82,7 @@ public static class AuthEndpoints
             // CRITICAL: Validate brand context is resolved
             if (!brandContext.IsResolved)
             {
-                logger.LogWarning("Admin login attempted without resolved brand context on host: {Host}", 
+                logger.LogWarning("Admin login attempted without resolved brand context on host: {Host}",
                     httpContext.Request.Host.Host);
                 return Results.Problem(
                     title: "Brand Not Resolved",
@@ -145,96 +145,40 @@ public static class AuthEndpoints
             // Issue JWT con aud = "backoffice" y claims de rol + brand
             var tokenResponse = jwtService.IssueToken("backoffice", claims, TimeSpan.FromHours(8));
 
-            // CRITICAL: Set cookie with brand-specific NAME to allow multiple sessions
-            // Use brand code in cookie name so each brand has independent cookies
-            var cookieName = $"bk.token.{brandContext.BrandCode.ToLower()}";
-            
-            var cookieOptions = new CookieOptions
-            {
-                HttpOnly = true,                 // Cookie no accesible desde JavaScript (seguridad)
-                Secure = true,                   // HTTPS obligatorio en producción
-                Path = "/",                      // Path "/" para cubrir todas las rutas /api/*
-                Expires = DateTimeOffset.UtcNow.AddHours(8)
-            };
+            // CRITICAL: Use CookieHelper for consistent cookie handling
+            // This ensures login and logout use identical cookie options
+            var cookieName = Casino.Infrastructure.Helpers.CookieHelper.GetBackofficeCookieName(brandContext.BrandCode);
+            var cookieOptions = Casino.Infrastructure.Helpers.CookieHelper.GetAuthCookieOptions(
+                httpContext, 
+                DateTimeOffset.UtcNow.AddHours(8));
 
-            // CRITICAL: Configure SameSite and Domain based on environment
-            var host = httpContext.Request.Host.Host;
-            var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
-            
-            // Parse origin to get just the hostname
-            string? originHost = null;
-            if (!string.IsNullOrEmpty(origin))
-            {
-                try
-                {
-                    var originUri = new Uri(origin);
-                    originHost = originUri.Host;
-                }
-                catch
-                {
-                    // Invalid origin, treat as cross-site for safety
-                    originHost = null;
-                }
-            }
-            
-            // Check if frontend is on different domain (cross-site scenario)
-            // Compare the EXACT hostnames (not contains, which can give false positives)
-            bool isCrossSite = !string.IsNullOrEmpty(originHost) && 
-                              originHost != host && 
-                              !host.Contains("localhost") && 
-                              !host.StartsWith("127.0.0.1");
-
-            if (isCrossSite)
-            {
-                // Cross-site scenario (e.g., netlify.app → railway.app)
-                // MUST use SameSite=None to allow cross-site cookies
-                cookieOptions.SameSite = SameSiteMode.None;
-                // CRITICAL: DO NOT set Domain for cross-site (host-only cookie)
-                logger.LogInformation("Cross-site detected: OriginHost={OriginHost}, BackendHost={Host} → Using SameSite=None, NO Domain", 
-                    originHost, host);
-            }
-            else
-            {
-                // Same-site or localhost → use Lax for better security
-                cookieOptions.SameSite = SameSiteMode.Lax;
-                
-                // For same-site, we can optionally set domain for subdomain sharing
-                // But only if not localhost
-                if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
-                {
-                    // Same-site: can set domain to current host
-                    cookieOptions.Domain = host;
-                    logger.LogInformation("Same-site: OriginHost={OriginHost}, BackendHost={Host} → Using SameSite=Lax, Domain={Domain}", 
-                        originHost ?? "unknown", host, host);
-                }
-                else
-                {
-                    logger.LogInformation("Localhost: Using SameSite=Lax, NO Domain");
-                }
-            }
-            
-            // Use brand-specific cookie name
+            // Set auth cookie with brand-specific name
             httpContext.Response.Cookies.Append(cookieName, tokenResponse.AccessToken, cookieOptions);
-            
-            logger.LogInformation("Cookie set: {CookieName} for brand {BrandCode}", cookieName, brandContext.BrandCode);
+
+            logger.LogInformation(
+                "Auth cookie set: {CookieName} for brand {BrandCode} (SameSite={SameSite}, Secure={Secure}, HttpOnly={HttpOnly})",
+                cookieName, brandContext.BrandCode, cookieOptions.SameSite, cookieOptions.Secure, cookieOptions.HttpOnly);
 
             // Update last login
             user.LastLoginAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
 
             logger.LogInformation(
-                "✅ Successful admin login - User: {UserId} ({Username}) - Role: {Role} - Brand: {BrandCode} ({BrandId})", 
+                "✅ Successful admin login - User: {UserId} ({Username}) - Role: {Role} - Brand: {BrandCode} ({BrandId})",
                 user.Id, user.Username, user.Role, brandContext.BrandCode, brandContext.BrandId);
 
             // Return success response with brand info
-            return Results.Ok(new { 
-                ok = true, 
-                user = new { 
-                    user.Id, 
-                    user.Username, 
-                    Role = user.Role.ToString() 
+            return Results.Ok(new
+            {
+                ok = true,
+                user = new
+                {
+                    user.Id,
+                    user.Username,
+                    Role = user.Role.ToString()
                 },
-                brand = new {
+                brand = new
+                {
                     brandContext.BrandId,
                     brandContext.BrandCode,
                     brandContext.Domain
@@ -262,7 +206,7 @@ public static class AuthEndpoints
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("AuthEndpoints");
-        
+
         try
         {
             // Validate configuration first
@@ -271,7 +215,7 @@ public static class AuthEndpoints
             {
                 logger.LogError("JWT configuration missing: Auth:JwtKey is not configured");
                 return Results.Problem(
-                    title: "Configuration Error", 
+                    title: "Configuration Error",
                     detail: "JwtKey missing - server configuration error",
                     statusCode: 500);
             }
@@ -289,7 +233,7 @@ public static class AuthEndpoints
             logger.LogInformation("Player login attempt for brand: {BrandCode}", brandContext.BrandCode);
 
             // Validate input
-            if (string.IsNullOrEmpty(request.Password) || 
+            if (string.IsNullOrEmpty(request.Password) ||
                 (string.IsNullOrEmpty(request.Username) && !request.PlayerId.HasValue))
             {
                 logger.LogWarning("Player login attempt with invalid credentials for brand: {BrandCode}", brandContext.BrandCode);
@@ -315,9 +259,9 @@ public static class AuthEndpoints
             // For demo purposes, we're not requiring password hash for players yet
             // In production, implement proper password validation like admin
             // TODO: Implement password hashing for players when player registration is implemented
-            
+
             // For now, accept any password for demo players (this is for development only)
-            logger.LogInformation("Player login (demo mode): {PlayerId} - {Username} for brand: {BrandCode}", 
+            logger.LogInformation("Player login (demo mode): {PlayerId} - {Username} for brand: {BrandCode}",
                 player.Id, player.Username, brandContext.BrandCode);
 
             // Create claims
@@ -333,21 +277,18 @@ public static class AuthEndpoints
             // Issue JWT
             var tokenResponse = jwtService.IssueToken("player", claims, TimeSpan.FromHours(8));
 
-            // Set HttpOnly cookie
-            httpContext.Response.Cookies.Append(
-                "pl.token",
-                tokenResponse.AccessToken,
-                new CookieOptions
-                {
-                    HttpOnly = true,
-                    Secure = true, // Secure only if HTTPS
-                    SameSite = SameSiteMode.Lax,
-                    Path = "/",
-                    Expires = tokenResponse.ExpiresAt
-                });
+            // CRITICAL: Use CookieHelper for consistent cookie handling
+            var cookieName = Casino.Infrastructure.Helpers.CookieHelper.GetPlayerCookieName();
+            var cookieOptions = Casino.Infrastructure.Helpers.CookieHelper.GetAuthCookieOptions(
+                httpContext, 
+                tokenResponse.ExpiresAt);
 
-            logger.LogInformation("Successful player login: {PlayerId} - {Username} for brand: {BrandCode}", 
-                player.Id, player.Username, brandContext.BrandCode);
+            // Set auth cookie
+            httpContext.Response.Cookies.Append(cookieName, tokenResponse.AccessToken, cookieOptions);
+
+            logger.LogInformation(
+                "Successful player login: {PlayerId} - {Username} for brand: {BrandCode} (Cookie: {CookieName})",
+                player.Id, player.Username, brandContext.BrandCode, cookieName);
 
             var playerResponse = new
             {
@@ -364,7 +305,7 @@ public static class AuthEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Internal error during player login for brand: {BrandCode}", 
+            logger.LogError(ex, "Internal error during player login for brand: {BrandCode}",
                 brandContext.BrandCode ?? "unknown");
             return Results.Problem(
                 title: "Login Error",
@@ -377,60 +318,53 @@ public static class AuthEndpoints
     {
         var logger = loggerFactory.CreateLogger("AuthEndpoints");
         
-        // CRITICAL: Use brand-specific cookie name (same as login)
-        var cookieName = $"bk.token.{brandContext.BrandCode.ToLower()}";
+        // CRITICAL: Use CookieHelper for consistent cookie handling
+        // This ensures logout uses identical options as login
+        var cookieName = Casino.Infrastructure.Helpers.CookieHelper.GetBackofficeCookieName(brandContext.BrandCode);
         
         logger.LogInformation("Logout attempt for brand {BrandCode}, cookie: {CookieName}", 
             brandContext.BrandCode, cookieName);
         
-        // STRATEGY: Try multiple deletion approaches to ensure cookie is removed
-        // This handles both cross-site and same-site scenarios, as well as proxied requests
+        // Delete auth cookie using centralized helper
+        Casino.Infrastructure.Helpers.CookieHelper.DeleteAuthCookie(httpContext, cookieName, logger);
         
-        // 1. Delete without domain (host-only cookie - most common for cross-site)
-        var cookieOptionsNoDomain = new CookieOptions 
+        // Check if cookie was present in request (for frontend handling)
+        var cookieWasPresent = Casino.Infrastructure.Helpers.CookieHelper.IsCookiePresent(httpContext, cookieName);
+        
+        logger.LogInformation(
+            "Logout completed for brand {BrandCode}, cookie {CookieName} was present: {Present}",
+            brandContext.BrandCode, cookieName, cookieWasPresent);
+        
+        return Results.Ok(new 
         { 
-            Path = "/",
-            Secure = true,
-            HttpOnly = true,
-            SameSite = SameSiteMode.None  // For cross-site
-        };
-        httpContext.Response.Cookies.Delete(cookieName, cookieOptionsNoDomain);
-        logger.LogInformation("Deleted cookie (no domain, SameSite=None)");
-        
-        // 2. Delete with domain (for same-site scenarios)
-        var host = httpContext.Request.Host.Host;
-        if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
-        {
-            var cookieOptionsWithDomain = new CookieOptions 
-            { 
-                Path = "/",
-                Secure = true,
-                HttpOnly = true,
-                SameSite = SameSiteMode.Lax,
-                Domain = host
-            };
-            httpContext.Response.Cookies.Delete(cookieName, cookieOptionsWithDomain);
-            logger.LogInformation("Deleted cookie (domain={Domain}, SameSite=Lax)", host);
-        }
-        
-        // 3. Also try with Lax (for same-origin proxied requests)
-        var cookieOptionsLax = new CookieOptions 
-        { 
-            Path = "/",
-            Secure = true,
-            HttpOnly = true,
-            SameSite = SameSiteMode.Lax
-        };
-        httpContext.Response.Cookies.Delete(cookieName, cookieOptionsLax);
-        logger.LogInformation("Deleted cookie (no domain, SameSite=Lax)");
-        
-        return Results.Ok(new { ok = true, message = "Logged out successfully" });
+            ok = true, 
+            message = "Logged out successfully",
+            cookieName = cookieName,  // Para que el frontend también lo borre
+            cookieWasPresent = cookieWasPresent
+        });
     }
 
-    public static IResult PlayerLogout(HttpContext httpContext)
+    public static IResult PlayerLogout(HttpContext httpContext, ILoggerFactory loggerFactory)
     {
-        httpContext.Response.Cookies.Delete("pl.token", new CookieOptions { Path = "/" });
-        return TypedResults.Ok(new LogoutResponse(Success: true, Message: "Logged out successfully"));
+        var logger = loggerFactory.CreateLogger("AuthEndpoints");
+        
+        // CRITICAL: Use CookieHelper for consistent cookie handling
+        var cookieName = Casino.Infrastructure.Helpers.CookieHelper.GetPlayerCookieName();
+        
+        logger.LogInformation("Player logout attempt, cookie: {CookieName}", cookieName);
+        
+        // Delete auth cookie using centralized helper
+        Casino.Infrastructure.Helpers.CookieHelper.DeleteAuthCookie(httpContext, cookieName, logger);
+        
+        var cookieWasPresent = Casino.Infrastructure.Helpers.CookieHelper.IsCookiePresent(httpContext, cookieName);
+        
+        logger.LogInformation(
+            "Player logout completed, cookie {CookieName} was present: {Present}",
+            cookieName, cookieWasPresent);
+        
+        return TypedResults.Ok(new LogoutResponse(
+            Success: true, 
+            Message: "Logged out successfully"));
     }
 
     public static async Task<IResult> GetAdminProfile(
@@ -439,7 +373,7 @@ public static class AuthEndpoints
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("AuthEndpoints");
-        
+
         try
         {
             var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -484,7 +418,7 @@ public static class AuthEndpoints
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("AuthEndpoints");
-        
+
         try
         {
             var playerIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -501,7 +435,7 @@ public static class AuthEndpoints
 
             if (player == null)
             {
-                logger.LogWarning("Player not found or not authorized for brand: {PlayerId} - {BrandCode}", 
+                logger.LogWarning("Player not found or not authorized for brand: {PlayerId} - {BrandCode}",
                     playerId, brandContext.BrandCode);
                 return Results.Problem("Player not found or not authorized for this brand", statusCode: 404);
             }
