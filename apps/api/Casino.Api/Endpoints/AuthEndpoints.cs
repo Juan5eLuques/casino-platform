@@ -373,51 +373,57 @@ public static class AuthEndpoints
         }
     }
 
-    public static IResult AdminLogout(HttpContext httpContext, BrandContext brandContext)
+    public static IResult AdminLogout(HttpContext httpContext, BrandContext brandContext, ILoggerFactory loggerFactory)
     {
+        var logger = loggerFactory.CreateLogger("AuthEndpoints");
+        
         // CRITICAL: Use brand-specific cookie name (same as login)
         var cookieName = $"bk.token.{brandContext.BrandCode.ToLower()}";
         
-        // CRITICAL: Match cookie options with login for proper deletion
-        var origin = httpContext.Request.Headers["Origin"].FirstOrDefault();
-        var host = httpContext.Request.Host.Host;
+        logger.LogInformation("Logout attempt for brand {BrandCode}, cookie: {CookieName}", 
+            brandContext.BrandCode, cookieName);
         
-        // Parse origin to get just the hostname
-        string? originHost = null;
-        if (!string.IsNullOrEmpty(origin))
-        {
-            try
-            {
-                var originUri = new Uri(origin);
-                originHost = originUri.Host;
-            }
-            catch
-            {
-                originHost = null;
-            }
-        }
+        // STRATEGY: Try multiple deletion approaches to ensure cookie is removed
+        // This handles both cross-site and same-site scenarios, as well as proxied requests
         
-        // Check if cross-site (EXACT hostname comparison)
-        bool isCrossSite = !string.IsNullOrEmpty(originHost) && 
-                          originHost != host && 
-                          !host.Contains("localhost") && 
-                          !host.StartsWith("127.0.0.1");
-
-        var cookieOptions = new CookieOptions 
+        // 1. Delete without domain (host-only cookie - most common for cross-site)
+        var cookieOptionsNoDomain = new CookieOptions 
         { 
             Path = "/",
             Secure = true,
             HttpOnly = true,
-            SameSite = isCrossSite ? SameSiteMode.None : SameSiteMode.Lax
+            SameSite = SameSiteMode.None  // For cross-site
         };
-
-        // CRITICAL: Only set domain for same-site (NOT for cross-site)
-        if (!isCrossSite && !host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
+        httpContext.Response.Cookies.Delete(cookieName, cookieOptionsNoDomain);
+        logger.LogInformation("Deleted cookie (no domain, SameSite=None)");
+        
+        // 2. Delete with domain (for same-site scenarios)
+        var host = httpContext.Request.Host.Host;
+        if (!host.Contains("localhost") && !host.StartsWith("127.0.0.1"))
         {
-            cookieOptions.Domain = host;
+            var cookieOptionsWithDomain = new CookieOptions 
+            { 
+                Path = "/",
+                Secure = true,
+                HttpOnly = true,
+                SameSite = SameSiteMode.Lax,
+                Domain = host
+            };
+            httpContext.Response.Cookies.Delete(cookieName, cookieOptionsWithDomain);
+            logger.LogInformation("Deleted cookie (domain={Domain}, SameSite=Lax)", host);
         }
         
-        httpContext.Response.Cookies.Delete(cookieName, cookieOptions);
+        // 3. Also try with Lax (for same-origin proxied requests)
+        var cookieOptionsLax = new CookieOptions 
+        { 
+            Path = "/",
+            Secure = true,
+            HttpOnly = true,
+            SameSite = SameSiteMode.Lax
+        };
+        httpContext.Response.Cookies.Delete(cookieName, cookieOptionsLax);
+        logger.LogInformation("Deleted cookie (no domain, SameSite=Lax)");
+        
         return Results.Ok(new { ok = true, message = "Logged out successfully" });
     }
 
