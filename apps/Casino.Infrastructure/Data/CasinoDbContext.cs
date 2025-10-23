@@ -26,10 +26,14 @@ public class CasinoDbContext : DbContext
     public DbSet<ProviderAudit> ProviderAudits { get; set; }
     public DbSet<BrandProviderConfig> BrandProviderConfigs { get; set; }
     
+    // ? NEW: Game Catalog and Launch System
+    public DbSet<GameProvider> GameProviders { get; set; }
+    public DbSet<GameLaunchLog> GameLaunchLogs { get; set; }
+    
     // Simple Wallet System
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
-    
-    // Multilevel Hierarchy and Commission System
+  
+  // Multilevel Hierarchy and Commission System
     public DbSet<CommissionAccrual> CommissionAccruals { get; set; }
     public DbSet<MonthlyClosure> MonthlyClosures { get; set; }
 
@@ -134,61 +138,151 @@ public class CasinoDbContext : DbContext
 
         // Game configuration
         modelBuilder.Entity<Game>(entity =>
-        {
+     {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.Code).IsUnique();
-            entity.Property(e => e.Code).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.Provider).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-        });
-
-        // BrandGame configuration
+    entity.HasIndex(e => e.Code).IsUnique();
+     entity.Property(e => e.Code).IsRequired().HasMaxLength(100);
+entity.Property(e => e.Provider).IsRequired().HasMaxLength(100);
+          entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+ entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+          
+        // ? NEW FIELDS CONFIGURATION
+  entity.Property(e => e.LaunchId).HasMaxLength(200);
+      
+     // ? Type field - stored as string in DB
+            entity.Property(e => e.Type)
+ .HasConversion<string>()
+              .IsRequired()
+      .HasMaxLength(20)
+     .HasDefaultValue(GameType.SLOT);
+  
+entity.Property(e => e.RTP).HasPrecision(5, 2);
+         entity.Property(e => e.Volatility).HasMaxLength(20);
+   entity.Property(e => e.Category).HasMaxLength(50);
+   entity.Property(e => e.ImageUrl).HasMaxLength(500);
+ entity.Property(e => e.MinBet).HasPrecision(18, 2);
+            entity.Property(e => e.MaxBet).HasPrecision(18, 2);
+ entity.Property(e => e.AdditionalTags)
+       .HasConversion(
+       v => string.Join(',', v),
+      v => v.Split(',', StringSplitOptions.RemoveEmptyEntries))
+ .Metadata.SetValueComparer(new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<string[]>
+(
+     (c1, c2) => c1!.SequenceEqual(c2!),
+  c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+    c => c.ToArray()));
+      
+      // Relationship with GameProvider
+          entity.HasOne(e => e.ProviderEntity)
+   .WithMany(p => p.Games)
+        .HasForeignKey(e => e.ProviderId)
+  .OnDelete(DeleteBehavior.SetNull);
+         
+      // Index for Type filtering
+            entity.HasIndex(e => e.Type);
+     });
+        
+        // ? RESTORED: BrandGame configuration
         modelBuilder.Entity<BrandGame>(entity =>
         {
             entity.HasKey(e => new { e.BrandId, e.GameId });
-            entity.Property(e => e.Tags)
+          entity.Property(e => e.Tags)
                 .HasConversion(
-                    v => string.Join(',', v),
-                    v => v.Split(',', StringSplitOptions.RemoveEmptyEntries))
-                .Metadata.SetValueComparer(new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<string[]>(
-                    (c1, c2) => c1!.SequenceEqual(c2!),
-                    c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
-                    c => c.ToArray()));
-            
-            entity.HasOne(e => e.Brand)
-                .WithMany(b => b.BrandGames)
-                .HasForeignKey(e => e.BrandId);
+      v => string.Join(',', v),
+         v => v.Split(',', StringSplitOptions.RemoveEmptyEntries))
+          .Metadata.SetValueComparer(new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<string[]>
+(
+ (c1, c2) => c1!.SequenceEqual(c2!),
+        c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+    c => c.ToArray()));
+       
+    entity.HasOne(e => e.Brand)
+             .WithMany(b => b.BrandGames)
+    .HasForeignKey(e => e.BrandId);
             entity.HasOne(e => e.Game)
-                .WithMany(g => g.BrandGames)
-                .HasForeignKey(e => e.GameId);
+  .WithMany(g => g.BrandGames)
+ .HasForeignKey(e => e.GameId);
         });
 
-        // GameSession configuration
-        modelBuilder.Entity<GameSession>(entity =>
+     // ? GameSession configuration
+      modelBuilder.Entity<GameSession>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.GameCode).IsRequired().HasMaxLength(100);
+ entity.Property(e => e.GameCode).IsRequired().HasMaxLength(100);
             entity.Property(e => e.Provider).IsRequired().HasMaxLength(100);
             entity.Property(e => e.Status).HasConversion<string>();
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            
-            entity.HasOne(e => e.Player)
-                .WithMany(p => p.GameSessions)
-                .HasForeignKey(e => e.PlayerId);
+    entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+         
+  entity.HasOne(e => e.Player)
+           .WithMany(p => p.GameSessions)
+    .HasForeignKey(e => e.PlayerId);
         });
 
-        // Round configuration
+      // ? Round configuration
         modelBuilder.Entity<Round>(entity =>
         {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Status).HasConversion<string>();
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            
-            entity.HasOne(e => e.Session)
-                .WithMany(s => s.Rounds)
-                .HasForeignKey(e => e.SessionId);
+       entity.HasKey(e => e.Id);
+   entity.Property(e => e.Status).HasConversion<string>();
+      entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+    
+   entity.HasOne(e => e.Session)
+        .WithMany(s => s.Rounds)
+      .HasForeignKey(e => e.SessionId);
         });
+   
+        // ? NEW: GameProvider configuration
+        modelBuilder.Entity<GameProvider>(entity =>
+    {
+ entity.HasKey(e => e.Id);
+  entity.HasIndex(e => e.Code).IsUnique();
+    entity.Property(e => e.Code).IsRequired().HasMaxLength(50);
+  entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.LaunchEndpointTemplate).IsRequired();
+      entity.Property(e => e.DefaultMeta)
+  .HasColumnType("jsonb");
+     entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+        
+   // ? NEW: GameLaunchLog configuration
+        modelBuilder.Entity<GameLaunchLog>(entity =>
+      {
+     entity.HasKey(e => e.Id);
+     
+     // Indexes for performance
+            entity.HasIndex(e => e.SessionId);
+         entity.HasIndex(e => e.PlayerId);
+     entity.HasIndex(e => e.GameId);
+  entity.HasIndex(e => e.BrandId);
+          entity.HasIndex(e => e.CreatedAt);
+    entity.HasIndex(e => new { e.Provider, e.CreatedAt });
+    
+entity.Property(e => e.Provider).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.LaunchUrl).IsRequired();
+         entity.Property(e => e.SessionToken).IsRequired().HasMaxLength(500);
+     entity.Property(e => e.ErrorMessage).HasMaxLength(1000);
+ entity.Property(e => e.IpAddress).HasMaxLength(45);
+   entity.Property(e => e.UserAgent).HasMaxLength(500);
+     entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+        
+        // Relationships
+            entity.HasOne(e => e.Session)
+        .WithMany()
+       .HasForeignKey(e => e.SessionId)
+  .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(e => e.Player)
+   .WithMany()
+    .HasForeignKey(e => e.PlayerId)
+.OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Game)
+    .WithMany(g => g.LaunchLogs)
+.HasForeignKey(e => e.GameId)
+         .OnDelete(DeleteBehavior.Restrict);
+     entity.HasOne(e => e.Brand)
+ .WithMany()
+    .HasForeignKey(e => e.BrandId)
+     .OnDelete(DeleteBehavior.Restrict);
+      });
 
         // BackofficeUser configuration
         modelBuilder.Entity<BackofficeUser>(entity =>

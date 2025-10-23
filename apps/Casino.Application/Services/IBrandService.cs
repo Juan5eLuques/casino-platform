@@ -32,12 +32,3 @@ public interface IBrandService
     // Cache invalidation
     Task InvalidateBrandCacheAsync(Guid brandId);
 }
-
-public record GetBrandGameResult(
-    Guid GameId,
-    string Code,
-    string Name,
-    string Provider,
-    bool Enabled,
-    int DisplayOrder,
-    string[] Tags);

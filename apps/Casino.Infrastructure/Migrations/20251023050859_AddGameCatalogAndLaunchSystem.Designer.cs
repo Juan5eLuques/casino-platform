@@ -4,6 +4,7 @@ using System.Text.Json;
 using Casino.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Casino.Infrastructure.Migrations
 {
     [DbContext(typeof(CasinoDbContext))]
-    partial class CasinoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251023050859_AddGameCatalogAndLaunchSystem")]
+    partial class AddGameCatalogAndLaunchSystem
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -456,13 +459,6 @@ namespace Casino.Infrastructure.Migrations
                         .HasPrecision(5, 2)
                         .HasColumnType("numeric(5,2)");
 
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasDefaultValue("SLOT");
-
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -476,8 +472,6 @@ namespace Casino.Infrastructure.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProviderId");
-
-                    b.HasIndex("Type");
 
                     b.ToTable("Games");
                 });

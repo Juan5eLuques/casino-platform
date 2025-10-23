@@ -415,6 +415,15 @@ public class BrandService : IBrandService
                 bg.Game.Code,
                 bg.Game.Name,
                 bg.Game.Provider,
+                bg.Game.Type,           // ? NEW
+                bg.Game.Category,       // ? NEW
+                bg.Game.ImageUrl,      // ? NEW
+                bg.Game.RTP,           // ? NEW
+                bg.Game.Volatility,    // ? NEW
+                bg.Game.MinBet,     // ? NEW
+                bg.Game.MaxBet,      // ? NEW
+                bg.Game.IsFeatured,    // ? NEW
+                bg.Game.IsNew,         // ? NEW
                 bg.Enabled,
                 bg.DisplayOrder,
                 bg.Tags))

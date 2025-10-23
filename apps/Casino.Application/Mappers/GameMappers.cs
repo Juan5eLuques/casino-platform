@@ -8,11 +8,22 @@ public static class GameMappers
 {
     public static CatalogGameResponse ToCatalogDto(this GetBrandGameResult result)
     {
+        // Note: GetBrandGameResult doesn't have extended fields yet
+        // We'll need to update it or fetch from Game entity
         return new CatalogGameResponse(
             result.GameId,
             result.Code,
             result.Name,
             result.Provider,
+            result.Type.ToString(),// ? Convert enum to string
+            result.Category ?? "other",
+            result.ImageUrl,
+            result.RTP,
+            result.Volatility,
+            result.MinBet,
+            result.MaxBet,
+            result.IsFeatured,
+            result.IsNew,
             result.Enabled,
             result.DisplayOrder,
             result.Tags);
@@ -38,8 +49,20 @@ public static class GameMappers
             game.Code,
             game.Provider,
             game.Name,
+            game.LaunchId,
+            game.Type,
+            game.RTP,
+            game.Volatility,
+            game.Category,
+            game.ImageUrl,
+            game.MinBet,
+            game.MaxBet,
+            game.IsFeatured,
+            game.IsNew,
+            game.AdditionalTags,
             game.Enabled,
-            game.CreatedAt);
+            game.CreatedAt,
+            game.UpdatedAt);
     }
 
     public static CreateGameResponse ToCreateDto(this Game game)

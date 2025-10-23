@@ -32,20 +32,45 @@ public class GameService : IGameService
                 throw new InvalidOperationException($"Game with code '{request.Code}' already exists");
             }
 
+            // ? Resolver ProviderId desde el código del proveedor
+            Guid? providerId = null;
+            if (!string.IsNullOrEmpty(request.Provider))
+            {
+                var provider = await _context.GameProviders
+                    .FirstOrDefaultAsync(p => p.Code.ToLower() == request.Provider.ToLower());
+                providerId = provider?.Id;
+            }
+
             var game = new Game
             {
                 Id = Guid.NewGuid(),
                 Code = request.Code,
                 Provider = request.Provider,
                 Name = request.Name,
+                // ? NEW FIELDS
+                ProviderId = providerId,
+                LaunchId = request.LaunchId,
+                Type = request.Type,
+                RTP = request.RTP,
+                Volatility = request.Volatility,
+                Category = request.Category,
+                ImageUrl = request.ImageUrl,
+                MinBet = request.MinBet,
+                MaxBet = request.MaxBet,
+                IsFeatured = request.IsFeatured,
+                IsNew = request.IsNew,
+                AdditionalTags = request.AdditionalTags ?? Array.Empty<string>(),
                 Enabled = request.Enabled,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
             };
 
             _context.Games.Add(game);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Game created: {Code} by provider {Provider}", request.Code, request.Provider);
+            _logger.LogInformation("Game created: {Code} by provider {Provider} with {Fields} extended fields",
+                request.Code, request.Provider,
+                new { request.RTP, request.Category, request.IsFeatured });
 
             return new CreateGameResponse(
                 game.Id,
@@ -64,7 +89,9 @@ public class GameService : IGameService
 
     public async Task<IEnumerable<GetGameResponse>> GetGamesAsync(bool? enabled = null)
     {
-        var query = _context.Games.AsNoTracking();
+        var query = _context.Games
+            .Include(g => g.ProviderEntity)
+            .AsNoTracking();
 
         if (enabled.HasValue)
             query = query.Where(g => g.Enabled == enabled.Value);
@@ -73,31 +100,60 @@ public class GameService : IGameService
             .OrderBy(g => g.Name)
             .ToListAsync();
 
+        // ? Map to extended response with all fields
         return games.Select(g => new GetGameResponse(
             g.Id,
             g.Code,
             g.Provider,
             g.Name,
+            g.LaunchId,
+            g.Type,
+            g.RTP,
+            g.Volatility,
+            g.Category,
+            g.ImageUrl,
+            g.MinBet,
+            g.MaxBet,
+            g.IsFeatured,
+            g.IsNew,
+            g.AdditionalTags,
             g.Enabled,
-            g.CreatedAt));
+            g.CreatedAt,
+            g.UpdatedAt
+        ));
     }
 
     public async Task<GetGameResponse?> GetGameAsync(Guid gameId)
     {
         var game = await _context.Games
+            .Include(g => g.ProviderEntity)
             .AsNoTracking()
             .FirstOrDefaultAsync(g => g.Id == gameId);
 
         if (game == null)
             return null;
 
+        // ? Map to extended response with all fields
         return new GetGameResponse(
             game.Id,
             game.Code,
             game.Provider,
             game.Name,
+            game.LaunchId,
+            game.Type,
+            game.RTP,
+            game.Volatility,
+            game.Category,
+            game.ImageUrl,
+            game.MinBet,
+            game.MaxBet,
+            game.IsFeatured,
+            game.IsNew,
+            game.AdditionalTags,
             game.Enabled,
-            game.CreatedAt);
+            game.CreatedAt,
+            game.UpdatedAt
+        );
     }
 
     public async Task<bool> UpdateGameAsync(Guid gameId, UpdateGameRequest request)
@@ -106,15 +162,52 @@ public class GameService : IGameService
         if (game == null)
             return false;
 
+        // Update basic fields
         if (!string.IsNullOrEmpty(request.Name))
             game.Name = request.Name;
 
         if (request.Enabled.HasValue)
             game.Enabled = request.Enabled.Value;
 
+        // ? Update new catalog fields
+        if (request.LaunchId != null)
+            game.LaunchId = request.LaunchId;
+
+        if (request.Type.HasValue)
+         game.Type = request.Type.Value;
+
+        if (request.RTP.HasValue)
+     game.RTP = request.RTP.Value;
+
+ if (!string.IsNullOrEmpty(request.Volatility))
+       game.Volatility = request.Volatility;
+
+   if (!string.IsNullOrEmpty(request.Category))
+     game.Category = request.Category;
+
+    if (!string.IsNullOrEmpty(request.ImageUrl))
+     game.ImageUrl = request.ImageUrl;
+
+     if (request.MinBet.HasValue)
+      game.MinBet = request.MinBet.Value;
+
+     if (request.MaxBet.HasValue)
+      game.MaxBet = request.MaxBet.Value;
+
+     if (request.IsFeatured.HasValue)
+   game.IsFeatured = request.IsFeatured.Value;
+
+  if (request.IsNew.HasValue)
+game.IsNew = request.IsNew.Value;
+
+   if (request.AdditionalTags != null)
+ game.AdditionalTags = request.AdditionalTags;
+
+        game.UpdatedAt = DateTime.UtcNow;
+
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation("Game updated: {GameId}", gameId);
+        _logger.LogInformation("Game updated: {GameId} - {Name}", gameId, game.Name);
         return true;
     }
 
@@ -205,14 +298,25 @@ public class GameService : IGameService
             .ThenBy(bg => bg.Game.Name)
             .ToListAsync();
 
+        // ? Map to extended GetBrandGameResult with all catalog fields
         return brandGames.Select(bg => new GetBrandGameResult(
             bg.GameId,
             bg.Game.Code,
             bg.Game.Name,
             bg.Game.Provider,
+            bg.Game.Type,           // ? NEW
+            bg.Game.Category,
+            bg.Game.ImageUrl,
+            bg.Game.RTP,
+            bg.Game.Volatility,
+            bg.Game.MinBet,
+            bg.Game.MaxBet,
+            bg.Game.IsFeatured,
+            bg.Game.IsNew,
             bg.Enabled,
             bg.DisplayOrder,
-            bg.Tags));
+            bg.Tags
+        ));
     }
 
     public async Task<bool> UpdateBrandGameAsync(UpdateBrandGameRequest request)

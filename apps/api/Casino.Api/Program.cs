@@ -42,6 +42,19 @@ builder.Services.AddScoped<IBrandService, BrandService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 
+// ✅ NEW: Game Catalog and Launch System
+// Register provider adapters
+builder.Services.AddScoped<Casino.Application.Providers.IProviderAdapter, Casino.Application.Providers.Implementations.MockProviderAdapter>();
+// Add more adapters here in the future:
+// builder.Services.AddScoped<IProviderAdapter, PragmaticProviderAdapter>();
+// builder.Services.AddScoped<IProviderAdapter, EvolutionProviderAdapter>();
+
+// Register adapter factory
+builder.Services.AddScoped<Casino.Application.Providers.IProviderAdapterFactory, Casino.Application.Providers.Implementations.ProviderAdapterFactory>();
+
+// Register game launch service
+builder.Services.AddScoped<IGameLaunchService, GameLaunchService>();
+
 // Register new services for missing endpoints
 builder.Services.AddScoped<IBackofficeUserService, BackofficeUserService>();
 builder.Services.AddScoped<IPlayerService, PlayerService>();
@@ -404,6 +417,12 @@ app.MapHealthChecks("/health")
 
 // SONNET: Map authentication endpoints (unprotected)
 app.MapAuthEndpoints();
+
+// ✅ NEW: Casino launch endpoints (PUBLIC - no auth required)
+app.MapCasinoEndpoints();
+
+// ✅ NEW: Catalog endpoints (PUBLIC - no auth required)
+app.MapCatalogEndpoints();
 
 // === GATEWAY ENDPOINTS (UNPROTECTED) ===
 // SONNET: Mantener compatibilidad con providers externos usando LegacyWalletService

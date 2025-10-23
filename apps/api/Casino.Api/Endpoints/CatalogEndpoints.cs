@@ -44,7 +44,13 @@ public static class CatalogEndpoints
     private static async Task<IResult> GetCatalogGames(
         BrandContext brandContext,
         IBrandService brandService,
-        bool? enabled = null,
+        [FromQuery] string? category = null,
+        [FromQuery] string? provider = null,
+        [FromQuery] string? type = null,
+        [FromQuery] bool? featured = null,
+        [FromQuery] bool? enabled = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
         ILogger<Program> logger = null!)
     {
         try
@@ -60,38 +66,77 @@ public static class CatalogEndpoints
             logger?.LogInformation("Getting catalog games for brand: {BrandCode} ({BrandId})", 
                 brandContext.BrandCode, brandContext.BrandId);
 
-            // Usar el servicio para obtener los juegos y mapear a DTOs
+            // Usar el servicio para obtener los juegos
             var gamesResult = await brandService.GetBrandCatalogAsync(brandContext.BrandId);
-            
-            // Filtrar por enabled si se especifica
-            if (enabled.HasValue)
-            {
-                gamesResult = gamesResult.Where(g => g.Enabled == enabled.Value);
-            }
+       
+    // Aplicar filtros en memoria (ya que GetBrandCatalogAsync devuelve IEnumerable)
+            if (!string.IsNullOrEmpty(category))
+    gamesResult = gamesResult.Where(g => g.Category == category);
 
-            // Mapear a DTOs
-            var games = gamesResult.Select(g => new CatalogGameResponse(
-                g.GameId,
-                g.Code, 
-                g.Name,
-                g.Provider,
-                g.Enabled,
-                g.DisplayOrder,
-                g.Tags)).ToList();
+      if (!string.IsNullOrEmpty(provider))
+   gamesResult = gamesResult.Where(g => g.Provider == provider);
 
-            logger?.LogInformation("Retrieved {Count} games for brand {BrandCode}", 
-                games.Count, brandContext.BrandCode);
+            // ? NEW: Filter by Type
+       if (!string.IsNullOrEmpty(type) && Enum.TryParse<Casino.Domain.Enums.GameType>(type, true, out var gameType))
+         gamesResult = gamesResult.Where(g => g.Type == gameType);
 
-            return TypedResults.Ok(games);
-        }
+     if (featured.HasValue)
+    gamesResult = gamesResult.Where(g => g.IsFeatured == featured.Value);
+
+    if (enabled.HasValue)
+   gamesResult = gamesResult.Where(g => g.Enabled == enabled.Value);
+
+ // Materializar la lista para poder contar y paginar
+  var gamesList = gamesResult.ToList();
+         var totalCount = gamesList.Count;
+
+        // Aplicar paginación
+    var paginatedGames = gamesList
+ .Skip((page - 1) * pageSize)
+   .Take(pageSize)
+   .ToList();
+
+       // Mapear a DTOs con todos los campos extendidos
+   var games = paginatedGames.Select(g => new CatalogGameResponse(
+    g.GameId,
+                g.Code,
+   g.Name,
+        g.Provider,
+   g.Type.ToString(),  // ? Convert enum to string
+    g.Category,
+        g.ImageUrl,
+   g.RTP,
+        g.Volatility,
+g.MinBet,
+   g.MaxBet,
+   g.IsFeatured,
+    g.IsNew,
+   g.Enabled,
+      g.DisplayOrder,
+  g.Tags
+           )).ToList();
+
+          // Response con paginación
+            var response = new CatalogGamesResponse(
+ games,
+       page,
+ pageSize,
+     totalCount
+     );
+
+    logger?.LogInformation("Retrieved {Count}/{Total} games for brand {BrandCode} (page {Page})", 
+    games.Count, totalCount, brandContext.BrandCode, page);
+
+     return TypedResults.Ok(response);
+ }
         catch (Exception ex)
         {
-            logger?.LogError(ex, "Error getting catalog games for brand: {BrandCode}", brandContext.BrandCode);
-            return Results.Problem(
-                title: "Internal Server Error",
-                detail: "An error occurred while getting catalog games",
-                statusCode: 500);
-        }
+     logger?.LogError(ex, "Error getting catalog games for brand: {BrandCode}", brandContext.BrandCode);
+     return Results.Problem(
+        title: "Internal Server Error",
+      detail: "An error occurred while getting catalog games",
+    statusCode: 500);
+     }
     }
 
     private static async Task<IResult> LaunchGame(
