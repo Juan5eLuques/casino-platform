@@ -28,6 +28,10 @@ public class CasinoDbContext : DbContext
     
     // Simple Wallet System
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
+    
+    // Multilevel Hierarchy and Commission System
+    public DbSet<CommissionAccrual> CommissionAccruals { get; set; }
+    public DbSet<MonthlyClosure> MonthlyClosures { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -209,11 +213,22 @@ public class CasinoDbContext : DbContext
                 .WithMany(b => b.BrandUsers)
                 .HasForeignKey(e => e.BrandId);
             
-            // Hierarchical relationship for cashiers
+            // Hierarchical relationship for cashiers (DEPRECATED - use ParentAdmin)
             entity.HasOne(e => e.ParentCashier)
                 .WithMany(p => p.SubordinateCashiers)
                 .HasForeignKey(e => e.ParentCashierId)
                 .OnDelete(DeleteBehavior.Restrict);
+            
+            // NEW: Multilevel hierarchy relationship
+            entity.HasOne(e => e.ParentAdmin)
+                .WithMany(p => p.SubordinateAdmins)
+                .HasForeignKey(e => e.ParentAdminId)
+                .OnDelete(DeleteBehavior.Restrict);
+            
+            entity.Property(e => e.HierarchyLevel).HasDefaultValue(0);
+            entity.Property(e => e.HierarchyPath).HasMaxLength(500);
+            entity.HasIndex(e => e.ParentAdminId);
+            entity.HasIndex(e => e.HierarchyPath);
                 
             // Relación con el usuario que creó este usuario
             entity.HasOne(e => e.CreatedByUser)
@@ -345,6 +360,105 @@ public class CasinoDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.CreatedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
+            
+            // NEW: Metadata fields
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.Metadata).HasColumnType("jsonb");
+            entity.Property(e => e.ActorIp).HasMaxLength(45);
+            entity.HasOne(e => e.ApprovedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.ApprovedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+        
+        // === COMMISSION AND CLOSURE SYSTEM ===
+        
+        // CommissionAccrual configuration
+        modelBuilder.Entity<CommissionAccrual>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            
+            entity.HasIndex(e => new { e.UserId, e.PeriodYear, e.PeriodMonth });
+            entity.HasIndex(e => e.Settled).HasFilter("\"Settled\" = false");
+            entity.HasIndex(e => new { e.BrandId, e.PeriodYear, e.PeriodMonth });
+            entity.HasIndex(e => e.SourceTransactionId).HasFilter("\"SourceTransactionId\" IS NOT NULL");
+            entity.HasIndex(e => e.SourceRoundId).HasFilter("\"SourceRoundId\" IS NOT NULL");
+            
+            // Unique constraint to prevent duplicates
+            entity.HasIndex(e => new { 
+                e.BrandId, e.UserId, e.PeriodYear, e.PeriodMonth, 
+                e.SourceTransactionId, e.SourceRoundId 
+            }).IsUnique();
+            
+            entity.Property(e => e.SourceType).HasMaxLength(50);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CommissionRate).HasPrecision(5, 4);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            
+            entity.HasOne(e => e.Brand)
+                .WithMany()
+                .HasForeignKey(e => e.BrandId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.ParentUser)
+                .WithMany()
+                .HasForeignKey(e => e.ParentUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.SettledTransaction)
+                .WithMany()
+                .HasForeignKey(e => e.SettledTransactionId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.SourceTransaction)
+                .WithMany()
+                .HasForeignKey(e => e.SourceTransactionId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.SourceRound)
+                .WithMany()
+                .HasForeignKey(e => e.SourceRoundId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.SourcePlayer)
+                .WithMany()
+                .HasForeignKey(e => e.SourcePlayerId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+        
+        // MonthlyClosure configuration
+        modelBuilder.Entity<MonthlyClosure>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            
+            entity.HasIndex(e => new { e.BrandId, e.PeriodYear, e.PeriodMonth });
+            entity.HasIndex(e => e.ClosureStatus).HasFilter("\"ClosureStatus\" != 'COMPLETED'");
+            entity.HasIndex(e => new { e.UserId, e.PeriodYear, e.PeriodMonth })
+                .HasFilter("\"UserId\" IS NOT NULL");
+            
+            // Unique constraint: one closure per brand/user/period
+            entity.HasIndex(e => new { e.BrandId, e.UserId, e.PeriodYear, e.PeriodMonth })
+                .IsUnique();
+            
+            entity.Property(e => e.ClosureStatus)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasDefaultValue("PENDING");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            
+            entity.HasOne(e => e.Brand)
+                .WithMany()
+                .HasForeignKey(e => e.BrandId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.ClosedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.ClosedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

@@ -13,8 +13,26 @@ public class BackofficeUser
     public DateTime CreatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
     
-    // Hierarchical structure for cashiers
+    // Hierarchical structure for cashiers (DEPRECATED - use ParentAdminId)
     public Guid? ParentCashierId { get; set; }
+    
+    // NEW: Multilevel hierarchy support
+    /// <summary>
+    /// ID del admin/cashier padre en la jerarquía (generaliza ParentCashierId)
+    /// Permite jerarquía multinivel: SUPER_ADMIN ? ADMIN ? SUB_ADMIN ? CASHIER
+    /// </summary>
+    public Guid? ParentAdminId { get; set; }
+    
+    /// <summary>
+    /// Nivel en la jerarquía: 0=SUPER_ADMIN, 1=BRAND_ADMIN, 2=SUB_ADMIN, 3=CASHIER
+    /// </summary>
+    public int HierarchyLevel { get; set; } = 0;
+    
+    /// <summary>
+    /// Path jerárquico para queries eficientes (ej: ".root.admin1.subadmin2.")
+    /// Permite buscar descendientes con: WHERE hierarchy_path LIKE '.root.admin1.%'
+    /// </summary>
+    public string? HierarchyPath { get; set; }
     
     // SONNET: Renombrado de CommissionRate a CommissionPercent (0-100) para consistencia
     public decimal CommissionPercent { get; set; } = 0; // Porcentaje de comisión sobre cashiers subordinados (0-100)
@@ -37,8 +55,13 @@ public class BackofficeUser
 
     // Navigation properties
     public Brand? Brand { get; set; }
-    public BackofficeUser? ParentCashier { get; set; }
-    public ICollection<BackofficeUser> SubordinateCashiers { get; set; } = new List<BackofficeUser>();
+    
+    // Hierarchical navigation
+    public BackofficeUser? ParentCashier { get; set; }  // DEPRECATED - use ParentAdmin
+    public BackofficeUser? ParentAdmin { get; set; }  // NEW: Parent en la jerarquía multinivel
+    public ICollection<BackofficeUser> SubordinateCashiers { get; set; } = new List<BackofficeUser>();  // DEPRECATED
+    public ICollection<BackofficeUser> SubordinateAdmins { get; set; } = new List<BackofficeUser>();  // NEW: Subordinados directos
+    
     public ICollection<CashierPlayer> CashierPlayers { get; set; } = new List<CashierPlayer>();
     public ICollection<BackofficeAudit> BackofficeAudits { get; set; } = new List<BackofficeAudit>();
     

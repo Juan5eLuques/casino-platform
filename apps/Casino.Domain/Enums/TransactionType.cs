@@ -11,6 +11,11 @@ public enum TransactionType
     MINT,
     
     /// <summary>
+    /// Destrucción de fondos por SUPER_ADMIN
+    /// </summary>
+    BURN,
+    
+    /// <summary>
     /// Transferencia entre usuarios del sistema
     /// </summary>
     TRANSFER,
@@ -48,5 +53,10 @@ public enum TransactionType
     /// <summary>
     /// Ajuste manual (futuro)
     /// </summary>
-    ADJUSTMENT
+    ADJUSTMENT,
+    
+    /// <summary>
+    /// Pago de comisión mensual
+    /// </summary>
+    COMMISSION
 }

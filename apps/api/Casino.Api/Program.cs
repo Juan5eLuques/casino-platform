@@ -54,6 +54,15 @@ builder.Services.AddScoped<IUnifiedUserService, UnifiedUserService>();
 // SONNET: User tree service - árbol genealógico de usuarios
 builder.Services.AddScoped<IUserTreeService, UserTreeService>();
 
+// NEW: Hierarchy service - multilevel admin hierarchy
+builder.Services.AddScoped<IHierarchyService, HierarchyService>();
+
+// NEW: Commission service - multilevel commission accrual and settlement
+builder.Services.AddScoped<ICommissionService, CommissionService>();
+
+// NEW: Dashboard service - backoffice dashboard data
+builder.Services.AddScoped<IDashboardService, DashboardService>();
+
 // SONNET: Wallet services - UNIFIED SYSTEM
 // Unified wallet service for gateway/games (uses Player.WalletBalance + WalletTransactions)
 builder.Services.AddScoped<IWalletService, UnifiedWalletService>();
@@ -81,8 +90,14 @@ var issuer = builder.Configuration["Auth:Issuer"] ?? "casino";
 var clockSkew = TimeSpan.FromMinutes(2);
 var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
 
-builder.Services.AddAuthentication()
-    .AddJwtBearer("BackofficeJwt", options =>
+builder.Services.AddAuthentication(options =>
+{
+    // Set default schemes
+    options.DefaultAuthenticateScheme = "BackofficeJwt";
+    options.DefaultChallengeScheme = "BackofficeJwt";
+    options.DefaultForbidScheme = "BackofficeJwt";
+})
+.AddJwtBearer("BackofficeJwt", options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
         {
@@ -427,5 +442,14 @@ adminGroup.MapUserTreeEndpoints();
 // adminGroup.MapBrandOnlyPlayerEndpoints();
 
 adminGroup.MapPasswordEndpoints();
+
+// NEW: Commission endpoints - multilevel commission management
+adminGroup.MapCommissionEndpoints();
+
+// NEW: Dashboard endpoints - backoffice dashboard data
+adminGroup.MapDashboardEndpoints();
+
+// NEW: Diagnostic endpoints - system diagnostics and reset
+app.MapDiagnosticEndpoints();
 
 app.Run();

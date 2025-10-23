@@ -212,10 +212,11 @@ public class AdminTransactionService : IAdminTransactionService
             .Take(request.PageSize)
             .ToListAsync();
 
-        // Obtener información de players y actors
+        // FIX: Obtener información de TODOS los usuarios (PLAYER y BACKOFFICE)
         var playerIds = transactions
             .SelectMany(t => new[] { t.FromUserId, t.ToUserId })
-            .Where(id => id != Guid.Empty && id != null)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
             .Distinct()
             .ToList();
 
@@ -223,11 +224,27 @@ public class AdminTransactionService : IAdminTransactionService
             .Where(p => playerIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p.Username);
 
-        var actorIds = transactions
-            .Select(t => t.CreatedByUserId)
-            .Where(id => id != Guid.Empty)
+        // FIX: Obtener backoffice users que aparecen en FROM o TO
+        var backofficeUserIds = transactions
+            .SelectMany(t => new[]
+            {
+                t.FromUserType == "BACKOFFICE" ? t.FromUserId : null,
+                t.ToUserType == "BACKOFFICE" ? (Guid?)t.ToUserId : null
+            })
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
             .Distinct()
             .ToList();
+
+        var backofficeUsers = await _context.BackofficeUsers
+            .Where(u => backofficeUserIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.Username);
+
+        var actorIds = transactions
+            .Select(t => t.CreatedByUserId)
+      .Where(id => id != Guid.Empty)
+      .Distinct()
+         .ToList();
 
         var actors = await _context.BackofficeUsers
             .Where(u => actorIds.Contains(u.Id))
@@ -236,43 +253,62 @@ public class AdminTransactionService : IAdminTransactionService
         // Mapear a response
         var transactionResponses = transactions.Select(t =>
         {
-            var playerId = t.ToUserType == "PLAYER" ? t.ToUserId : 
-                          t.FromUserType == "PLAYER" ? t.FromUserId!.Value : Guid.Empty;
-            
-            var playerUsername = playerId != Guid.Empty && players.TryGetValue(playerId, out var username) 
-                ? username : "Unknown";
+            // FIX: Obtener fromUsername correctamente según el tipo
+      string? fromUsername = null;
+ if (t.FromUserId.HasValue)
+   {
+           if (t.FromUserType == "BACKOFFICE")
+          {
+             backofficeUsers.TryGetValue(t.FromUserId.Value, out fromUsername);
+     }
+    else if (t.FromUserType == "PLAYER")
+   {
+        players.TryGetValue(t.FromUserId.Value, out fromUsername);
+        }
+        }
+
+            // FIX: Obtener toUsername correctamente según el tipo
+    string? toUsername = null;
+   if (t.ToUserType == "BACKOFFICE")
+            {
+          backofficeUsers.TryGetValue(t.ToUserId, out toUsername);
+            }
+ else if (t.ToUserType == "PLAYER")
+        {
+          players.TryGetValue(t.ToUserId, out toUsername);
+     }
 
             return new AdminTransactionResponse(
-                t.Id,
-                t.BrandId,
-                DetermineTypeFromTransactionType(t.TransactionType ?? TransactionType.BET), // "MINT", "BET", "WIN", etc.
-                t.FromUserId,
-                t.FromUserType,
-                t.FromUserId.HasValue && players.TryGetValue(t.FromUserId.Value, out var fromUsername) ? fromUsername : null,
-                t.PreviousBalanceFrom,
-                t.NewBalanceFrom,
+   t.Id,
+     t.BrandId,
+      DetermineTypeFromTransactionType(t.TransactionType ?? TransactionType.BET),
+       t.FromUserId,
+      t.FromUserType,
+     fromUsername, // ? Ahora se obtiene correctamente
+       t.PreviousBalanceFrom,
+       t.NewBalanceFrom,
                 t.ToUserId,
-                t.ToUserType,
-                playerUsername,
-                t.PreviousBalanceTo ?? 0,
-                t.NewBalanceTo ?? 0,
-                t.Amount,
-                t.Description,
-                t.TransactionType ?? TransactionType.BET,
-                t.CreatedByUserId,
-                actors.TryGetValue(t.CreatedByUserId, out var actorName) ? actorName : "Unknown",
-                t.CreatedByRole ?? "Unknown",
-                t.IdempotencyKey,
-                t.CreatedAt
-            );
+    t.ToUserType,
+       toUsername, // ? Ahora se obtiene correctamente
+          t.PreviousBalanceTo ?? 0,
+     t.NewBalanceTo ?? 0,
+        t.Amount,
+        t.Description,
+       t.TransactionType ?? TransactionType.BET,
+        t.CreatedByUserId,
+    actors.TryGetValue(t.CreatedByUserId, out var actorName) ? actorName : "Unknown",
+          t.CreatedByRole ?? "Unknown",
+   t.IdempotencyKey,
+          t.CreatedAt
+   );
         });
 
         return new GetAdminTransactionsResponse(
             transactionResponses,
-            totalCount,
-            request.Page,
+    totalCount,
+          request.Page,
             request.PageSize,
-            totalPages
+         totalPages
         );
     }
 
@@ -421,19 +457,30 @@ public class AdminTransactionService : IAdminTransactionService
     /// Obtiene el username de un usuario según su tipo
     /// Reutiliza la lógica de SimpleWalletService
     /// </summary>
-    private async Task<string> GetUsernameAsync(Guid userId, string userType)
+  private async Task<string> GetUsernameAsync(Guid userId, string userType)
     {
         if (userType == "BACKOFFICE")
         {
             var user = await _context.BackofficeUsers.FindAsync(userId);
-            return user?.Username ?? "Unknown";
+    if (user == null)
+   {
+            _logger.LogWarning("BACKOFFICE user not found: {UserId}", userId);
+         return "Unknown";
         }
-        else if (userType == "PLAYER")
+  return user.Username;
+        }
+ else if (userType == "PLAYER")
         {
             var player = await _context.Players.FindAsync(userId);
-            return player?.Username ?? "Unknown";
-        }
+ if (player == null)
+ {
+     _logger.LogWarning("PLAYER not found: {UserId}", userId);
+         return "Unknown";
+   }
+            return player.Username;
+      }
 
+        _logger.LogWarning("Invalid userType: {UserType} for userId: {UserId}", userType, userId);
         return "Unknown";
     }
 
@@ -539,39 +586,115 @@ public class AdminTransactionService : IAdminTransactionService
 
     /// <summary>
     /// Mapea WalletTransaction a AdminTransactionResponse
+    /// FIX: Usa batch queries para obtener usernames eficientemente
     /// </summary>
     private async Task<AdminTransactionResponse> MapTransactionToAdminResponseAsync(
         WalletTransaction transaction, Guid actorUserId, BackofficeUserRole actorRole)
     {
-        var fromUsername = transaction.FromUserId.HasValue 
-            ? await GetUsernameAsync(transaction.FromUserId.Value, transaction.FromUserType!) 
-            : null;
-        var toUsername = await GetUsernameAsync(transaction.ToUserId, transaction.ToUserType);
+      // FIX: Usar batch queries en lugar de consultas individuales
+ string? fromUsername = null;
+  string? toUsername = null;
         
-        var actor = await _context.BackofficeUsers.FindAsync(actorUserId);
+        // Obtener IDs únicos a buscar
+        var userIdsToQuery = new List<Guid>();
+        if (transaction.FromUserId.HasValue) userIdsToQuery.Add(transaction.FromUserId.Value);
+  userIdsToQuery.Add(transaction.ToUserId);
+  userIdsToQuery.Add(actorUserId);
+        userIdsToQuery = userIdsToQuery.Distinct().ToList();
+        
+   // Batch query para backoffice users
+    var backofficeUserIds = new List<Guid>();
+   if (transaction.FromUserType == "BACKOFFICE" && transaction.FromUserId.HasValue)
+    backofficeUserIds.Add(transaction.FromUserId.Value);
+        if (transaction.ToUserType == "BACKOFFICE")
+  backofficeUserIds.Add(transaction.ToUserId);
+        backofficeUserIds.Add(actorUserId); // Actor siempre es backoffice   
+   var backofficeUsers = await _context.BackofficeUsers
+ .Where(u => backofficeUserIds.Contains(u.Id))
+    .ToDictionaryAsync(u => u.Id, u => u.Username);
+ 
+        // Batch query para players
+     var playerIdsToQuery = new List<Guid>();
+        if (transaction.FromUserType == "PLAYER" && transaction.FromUserId.HasValue)
+            playerIdsToQuery.Add(transaction.FromUserId.Value);
+        if (transaction.ToUserType == "PLAYER")
+   playerIdsToQuery.Add(transaction.ToUserId);
+     
+        var players = await _context.Players
+    .Where(p => playerIdsToQuery.Contains(p.Id))
+  .ToDictionaryAsync(p => p.Id, p => p.Username);
+        
+   // Obtener fromUsername
+        if (transaction.FromUserId.HasValue)
+   {
+      if (transaction.FromUserType == "BACKOFFICE")
+      {
+       if (!backofficeUsers.TryGetValue(transaction.FromUserId.Value, out fromUsername))
+                {
+ _logger.LogWarning("FromUsername not found - BACKOFFICE user: {UserId}", transaction.FromUserId.Value);
+         fromUsername = null;
+      }
+         }
+        else if (transaction.FromUserType == "PLAYER")
+         {
+        if (!players.TryGetValue(transaction.FromUserId.Value, out fromUsername))
+        {
+             _logger.LogWarning("FromUsername not found - PLAYER: {UserId}", transaction.FromUserId.Value);
+        fromUsername = null;
+            }
+    }
+        }
+   
+ // Obtener toUsername
+   if (transaction.ToUserType == "BACKOFFICE")
+   {
+   if (!backofficeUsers.TryGetValue(transaction.ToUserId, out toUsername))
+       {
+     _logger.LogWarning("ToUsername not found - BACKOFFICE user: {UserId}", transaction.ToUserId);
+       toUsername = "Unknown";
+     }
+    }
+  else if (transaction.ToUserType == "PLAYER")
+        {
+      if (!players.TryGetValue(transaction.ToUserId, out toUsername))
+         {
+    _logger.LogWarning("ToUsername not found - PLAYER: {UserId}", transaction.ToUserId);
+    toUsername = "Unknown";
+      }
+        }
+  
+  // Obtener actor username
+        var actorUsername = backofficeUsers.TryGetValue(actorUserId, out var actor) 
+     ? actor 
+    : "Unknown";
+        
+  if (actorUsername == "Unknown")
+  {
+ _logger.LogWarning("Actor username not found: {ActorUserId}", actorUserId);
+}
 
-        return new AdminTransactionResponse(
-            transaction.Id,
-            transaction.BrandId,
-            DetermineTypeFromTransactionType(transaction.TransactionType ?? TransactionType.TRANSFER),
-            transaction.FromUserId,
-            transaction.FromUserType,
-            fromUsername,
-            transaction.PreviousBalanceFrom,
-            transaction.NewBalanceFrom,
+      return new AdminTransactionResponse(
+     transaction.Id,
+ transaction.BrandId,
+  DetermineTypeFromTransactionType(transaction.TransactionType ?? TransactionType.TRANSFER),
+      transaction.FromUserId,
+     transaction.FromUserType,
+       fromUsername,
+    transaction.PreviousBalanceFrom,
+     transaction.NewBalanceFrom,
             transaction.ToUserId,
             transaction.ToUserType,
             toUsername,
-            transaction.PreviousBalanceTo ?? 0,
-            transaction.NewBalanceTo ?? 0,
-            transaction.Amount,
-            transaction.Description,
+          transaction.PreviousBalanceTo ?? 0,
+         transaction.NewBalanceTo ?? 0,
+    transaction.Amount,
+         transaction.Description,
             transaction.TransactionType ?? TransactionType.TRANSFER,
-            actorUserId,
-            actor?.Username ?? "Unknown",
-            actorRole.ToString(),
-            transaction.IdempotencyKey,
-            transaction.CreatedAt
+ actorUserId,
+    actorUsername,
+    actorRole.ToString(),
+         transaction.IdempotencyKey,
+         transaction.CreatedAt
         );
     }
 }

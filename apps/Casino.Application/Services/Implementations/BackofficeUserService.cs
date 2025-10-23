@@ -139,7 +139,11 @@ public class BackofficeUserService : IBackofficeUserService
             CreatedAt = DateTime.UtcNow,
             // SONNET: Guardar auditoría de creación
             CreatedByUserId = currentUserId,
-            CreatedByRole = currentUser.Role.ToString()
+            CreatedByRole = currentUser.Role.ToString(),
+            // FIX: Establecer jerarquía correctamente
+            ParentAdminId = await DetermineParentAdminIdAsync(request.Role, currentUserId, currentUser.Role),
+            HierarchyLevel = await CalculateHierarchyLevelAsync(request.Role, currentUserId, currentUser.Role),
+            HierarchyPath = await BuildHierarchyPathAsync(request.Role, currentUserId, currentUser.Role)
         };
 
         _context.BackofficeUsers.Add(newUser);
@@ -308,6 +312,114 @@ public class BackofficeUserService : IBackofficeUserService
         }
 
         return result.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// FIX: Determina el ParentAdminId según el rol del usuario creador
+    /// </summary>
+    private async Task<Guid?> DetermineParentAdminIdAsync(
+        BackofficeUserRole newUserRole,
+        Guid creatorUserId,
+        BackofficeUserRole creatorRole)
+    {
+        // SUPER_ADMIN no tiene parent
+        if (newUserRole == BackofficeUserRole.SUPER_ADMIN)
+        {
+   return null;
+        }
+
+        // BRAND_ADMIN es creado por SUPER_ADMIN, su parent es el SUPER_ADMIN
+        if (newUserRole == BackofficeUserRole.BRAND_ADMIN)
+        {
+  if (creatorRole == BackofficeUserRole.SUPER_ADMIN)
+  {
+       return creatorUserId;
+  }
+ // Si es creado por otro BRAND_ADMIN (caso raro), no tiene parent
+         return null;
+        }
+
+   // CASHIER es creado por BRAND_ADMIN o por otro CASHIER
+        if (newUserRole == BackofficeUserRole.CASHIER)
+     {
+            if (creatorRole == BackofficeUserRole.BRAND_ADMIN)
+{
+                // Cashier creado por BRAND_ADMIN, su parent es el BRAND_ADMIN
+                return creatorUserId;
+  }
+            else if (creatorRole == BackofficeUserRole.CASHIER)
+            {
+      // Cashier creado por otro CASHIER, su parent es ese CASHIER
+        return creatorUserId;
+       }
+        }
+
+        return null;
+    }
+
+  /// <summary>
+    /// FIX: Calcula el HierarchyLevel según el rol y el creador
+  /// </summary>
+    private async Task<int> CalculateHierarchyLevelAsync(
+        BackofficeUserRole newUserRole,
+        Guid creatorUserId,
+   BackofficeUserRole creatorRole)
+  {
+        // SUPER_ADMIN siempre es nivel 0
+        if (newUserRole == BackofficeUserRole.SUPER_ADMIN)
+   {
+      return 0;
+        }
+
+        // Obtener el nivel del creador
+  var creator = await _context.BackofficeUsers
+   .FirstOrDefaultAsync(u => u.Id == creatorUserId);
+
+        if (creator == null)
+        {
+            // Fallback: asignar nivel por rol
+            return newUserRole switch
+          {
+       BackofficeUserRole.BRAND_ADMIN => 1,
+     BackofficeUserRole.CASHIER => 2,
+             _ => 0
+      };
+        }
+
+        // El nuevo usuario está un nivel debajo del creador
+        return creator.HierarchyLevel + 1;
+    }
+
+    /// <summary>
+    /// FIX: Construye el HierarchyPath incluyendo al creador
+    /// </summary>
+    private async Task<string> BuildHierarchyPathAsync(
+        BackofficeUserRole newUserRole,
+        Guid creatorUserId,
+     BackofficeUserRole creatorRole)
+    {
+ // SUPER_ADMIN tiene path vacío
+        if (newUserRole == BackofficeUserRole.SUPER_ADMIN)
+        {
+ return "";
+        }
+
+        // Obtener el creador
+        var creator = await _context.BackofficeUsers
+ .FirstOrDefaultAsync(u => u.Id == creatorUserId);
+
+        if (creator == null)
+        {
+            return creatorUserId.ToString();
+        }
+
+      // Construir path: path_del_creador + "/" + id_del_creador
+        if (string.IsNullOrEmpty(creator.HierarchyPath))
+        {
+            return creatorUserId.ToString();
+        }
+
+  return $"{creator.HierarchyPath}/{creatorUserId}";
     }
 
     public async Task<GetBackofficeUserResponse?> GetUserAsync(Guid userId, Guid? brandScope = null)

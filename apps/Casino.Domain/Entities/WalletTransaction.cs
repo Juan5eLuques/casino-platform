@@ -93,7 +93,34 @@ public class WalletTransaction
     /// </summary>
     public DateTime CreatedAt { get; set; }
     
+    // NEW: Metadata fields for flexibility and audit
+    /// <summary>
+    /// Notas adicionales de la transacción
+    /// </summary>
+    public string? Notes { get; set; }
+    
+    /// <summary>
+    /// Metadata flexible en formato JSON (ej: {"subtype":"PLAYER_TOPUP_INTERNAL"})
+    /// </summary>
+    public string? Metadata { get; set; }  // Stored as JSON string, can use JsonDocument
+    
+    /// <summary>
+    /// IP del actor que ejecutó la transacción
+    /// </summary>
+    public string? ActorIp { get; set; }
+    
+    /// <summary>
+    /// Usuario que aprobó la transacción (si aplica workflow de aprobación)
+    /// </summary>
+    public Guid? ApprovedByUserId { get; set; }
+    
+    /// <summary>
+    /// Fecha de aprobación de la transacción
+    /// </summary>
+    public DateTime? ApprovedAt { get; set; }
+    
     // Navigation properties
     public Brand Brand { get; set; } = null!;
     public BackofficeUser CreatedByUser { get; set; } = null!;
+    public BackofficeUser? ApprovedByUser { get; set; }
 }
