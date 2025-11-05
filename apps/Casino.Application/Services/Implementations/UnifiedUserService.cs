@@ -157,12 +157,20 @@ public class UnifiedUserService : IUnifiedUserService
         {
             // SUPER_ADMIN con global scope: ver todos
         }
-        else if (currentRole == BackofficeUserRole.SUPER_ADMIN || currentRole == BackofficeUserRole.BRAND_ADMIN)
+        else if (currentRole == BackofficeUserRole.SUPER_ADMIN)
         {
-            // SUPER_ADMIN sin global scope o BRAND_ADMIN: solo su brand
+            // SUPER_ADMIN sin global scope: solo su brand (excluye otros SUPER_ADMINs)
             if (brandScope.HasValue)
             {
-                query = query.Where(u => u.BrandId == brandScope.Value || u.BrandId == null); // Incluir SUPER_ADMINs
+                query = query.Where(u => u.BrandId == brandScope.Value);
+            }
+        }
+        else if (currentRole == BackofficeUserRole.BRAND_ADMIN)
+        {
+             // ? BRAND_ADMIN: solo usuarios de su brand, EXCLUYENDO SUPER_ADMINs
+            if (brandScope.HasValue)
+            {
+                query = query.Where(u => u.BrandId == brandScope.Value && u.Role != BackofficeUserRole.SUPER_ADMIN);
             }
         }
         else if (currentRole == BackofficeUserRole.CASHIER)
@@ -269,9 +277,15 @@ public class UnifiedUserService : IUnifiedUserService
         {
             query = query.Where(u => u.CreatedByUserId == currentUserId || u.Id == currentUserId);
         }
-        else if (currentRole != BackofficeUserRole.SUPER_ADMIN && brandScope.HasValue)
+        else if (currentRole == BackofficeUserRole.BRAND_ADMIN && brandScope.HasValue)
         {
-            query = query.Where(u => u.BrandId == brandScope.Value || u.BrandId == null);
+            // ? BRAND_ADMIN: solo usuarios de su brand, EXCLUYENDO SUPER_ADMINs
+            query = query.Where(u => u.BrandId == brandScope.Value && u.Role != BackofficeUserRole.SUPER_ADMIN);
+        }
+        else if (currentRole == BackofficeUserRole.SUPER_ADMIN && brandScope.HasValue)
+        {
+            // SUPER_ADMIN con brand scope: solo su brand
+            query = query.Where(u => u.BrandId == brandScope.Value);
         }
 
         var user = await query.FirstOrDefaultAsync();
@@ -362,33 +376,39 @@ public class UnifiedUserService : IUnifiedUserService
         {
             query = query.Where(u => u.CreatedByUserId == currentUserId || u.Id == currentUserId);
         }
-        else if (currentRole != BackofficeUserRole.SUPER_ADMIN && brandScope.HasValue)
+        else if (currentRole == BackofficeUserRole.BRAND_ADMIN && brandScope.HasValue)
         {
-            query = query.Where(u => u.BrandId == brandScope.Value || u.BrandId == null);
+             // ? BRAND_ADMIN: solo usuarios de su brand, EXCLUYENDO SUPER_ADMINs
+            query = query.Where(u => u.BrandId == brandScope.Value && u.Role != BackofficeUserRole.SUPER_ADMIN);
+        }
+     else if (currentRole == BackofficeUserRole.SUPER_ADMIN && brandScope.HasValue)
+   {
+ // SUPER_ADMIN con brand scope: solo su brand
+       query = query.Where(u => u.BrandId == brandScope.Value);
         }
 
-        var user = await query.FirstOrDefaultAsync();
+   var user = await query.FirstOrDefaultAsync();
         if (user == null) return null;
 
-        return new UnifiedUserResponse(
-            user.Id,
-            "BACKOFFICE",
-            user.Username,
-            null, // Email
-            user.Role.ToString(),
-            user.Status.ToString(),
-            user.BrandId,
-            user.Brand?.Name,
-            user.ParentCashierId,
-            user.ParentCashier?.Username,
-            user.CommissionPercent,
-            0, // SubordinatesCount
-            user.WalletBalance,
-            user.CreatedAt,
-            user.LastLoginAt,
-            user.CreatedByUserId,
+     return new UnifiedUserResponse(
+   user.Id,
+     "BACKOFFICE",
+user.Username,
+ null, // Email
+        user.Role.ToString(),
+     user.Status.ToString(),
+         user.BrandId,
+ user.Brand?.Name,
+      user.ParentCashierId,
+ user.ParentCashier?.Username,
+         user.CommissionPercent,
+ 0, // SubordinatesCount
+         user.WalletBalance,
+          user.CreatedAt,
+      user.LastLoginAt,
+      user.CreatedByUserId,
             user.CreatedByUser?.Username,
-            user.CreatedByRole
+      user.CreatedByRole
         );
     }
 

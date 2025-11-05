@@ -174,30 +174,38 @@ public class AdminTransactionService : IAdminTransactionService
 
         // Aplicar filtros
         if (request.UserId.HasValue)
-        {
+      {
             query = query.Where(t => 
-                t.FromUserId == request.UserId || 
-                t.ToUserId == request.UserId);
-        }
+       t.FromUserId == request.UserId || 
+      t.ToUserId == request.UserId);
+    }
 
-        if (request.TransactionType.HasValue)
-        {
-            query = query.Where(t => t.TransactionType == request.TransactionType);
-        }
+ if (request.TransactionType.HasValue)
+    {
+    query = query.Where(t => t.TransactionType == request.TransactionType);
+ }
 
         if (request.FromDate.HasValue)
-        {
-            query = query.Where(t => t.CreatedAt >= request.FromDate.Value);
-        }
+      {
+         // ? FIX: Asegurar que FromDate sea UTC
+            var fromDateUtc = request.FromDate.Value.Kind == DateTimeKind.Utc 
+            ? request.FromDate.Value 
+              : DateTime.SpecifyKind(request.FromDate.Value, DateTimeKind.Utc);
+            query = query.Where(t => t.CreatedAt >= fromDateUtc);
+    }
 
         if (request.ToDate.HasValue)
-        {
-            query = query.Where(t => t.CreatedAt <= request.ToDate.Value);
-        }
+     {
+            // ? FIX: Asegurar que ToDate sea UTC
+       var toDateUtc = request.ToDate.Value.Kind == DateTimeKind.Utc 
+  ? request.ToDate.Value 
+    : DateTime.SpecifyKind(request.ToDate.Value, DateTimeKind.Utc);
+            query = query.Where(t => t.CreatedAt <= toDateUtc);
+      }
 
         if (!string.IsNullOrEmpty(request.ExternalRef))
         {
-            query = query.Where(t => t.IdempotencyKey.Contains(request.ExternalRef));
+       query = query.Where(t => t.IdempotencyKey.Contains(request.ExternalRef));
         }
 
         // Ordenar por fecha descendente

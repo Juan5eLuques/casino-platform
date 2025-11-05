@@ -1,0 +1,6 @@
+@Casino.Api_HostAddress = http://localhost:5068
+
+GET {{Casino.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
