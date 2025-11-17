@@ -33,9 +33,12 @@ public class CasinoDbContext : DbContext
     // Simple Wallet System
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
   
-  // Multilevel Hierarchy and Commission System
+    // Multilevel Hierarchy and Commission System
     public DbSet<CommissionAccrual> CommissionAccruals { get; set; }
     public DbSet<MonthlyClosure> MonthlyClosures { get; set; }
+    
+    // Brand Assets System
+    public DbSet<BrandSettings> BrandSettings { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -528,31 +531,52 @@ entity.Property(e => e.Provider).IsRequired().HasMaxLength(50);
             entity.HasIndex(e => new { e.BrandId, e.PeriodYear, e.PeriodMonth });
             entity.HasIndex(e => e.ClosureStatus).HasFilter("\"ClosureStatus\" != 'COMPLETED'");
             entity.HasIndex(e => new { e.UserId, e.PeriodYear, e.PeriodMonth })
-                .HasFilter("\"UserId\" IS NOT NULL");
-            
-            // Unique constraint: one closure per brand/user/period
+          .HasFilter("\"UserId\" IS NOT NULL");
+       
+       // Unique constraint: one closure per brand/user/period
             entity.HasIndex(e => new { e.BrandId, e.UserId, e.PeriodYear, e.PeriodMonth })
-                .IsUnique();
-            
-            entity.Property(e => e.ClosureStatus)
-                .IsRequired()
-                .HasMaxLength(50)
-                .HasDefaultValue("PENDING");
+        .IsUnique();
+    
+  entity.Property(e => e.ClosureStatus)
+            .IsRequired()
+    .HasMaxLength(50)
+     .HasDefaultValue("PENDING");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            
-            entity.HasOne(e => e.Brand)
-                .WithMany()
-                .HasForeignKey(e => e.BrandId)
-                .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.User)
-                .WithMany()
+   
+      entity.HasOne(e => e.Brand)
+   .WithMany()
+    .HasForeignKey(e => e.BrandId)
+      .OnDelete(DeleteBehavior.Cascade);
+     entity.HasOne(e => e.User)
+    .WithMany()
                 .HasForeignKey(e => e.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+           .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.ClosedByUser)
                 .WithMany()
-                .HasForeignKey(e => e.ClosedByUserId)
-                .OnDelete(DeleteBehavior.SetNull);
+      .HasForeignKey(e => e.ClosedByUserId)
+       .OnDelete(DeleteBehavior.SetNull);
+        });
+        
+        // BrandSettings configuration
+        modelBuilder.Entity<BrandSettings>(entity =>
+        {
+    entity.HasKey(e => e.Id);
+       entity.HasIndex(e => e.BrandId).IsUnique();
+      
+       entity.Property(e => e.Colors)
+      .HasColumnType("jsonb")
+    .IsRequired();
+       entity.Property(e => e.Images)
+.HasColumnType("jsonb")
+       .IsRequired();
+      entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+          entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+     
+         entity.HasOne(e => e.Brand)
+         .WithOne()
+   .HasForeignKey<BrandSettings>(e => e.BrandId)
+       .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

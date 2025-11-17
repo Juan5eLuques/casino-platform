@@ -16,6 +16,8 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json.Serialization;
 using System.Reflection;
+using Amazon.S3;
+using Amazon.Runtime;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -29,6 +31,22 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // Add services to the container
 builder.Services.AddDbContext<CasinoDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+
+// Configure AWS S3 Client
+var awsAccessKey = builder.Configuration["AWS:AccessKey"];
+var awsSecretKey = builder.Configuration["AWS:SecretKey"];
+var awsRegion = builder.Configuration["AWS:S3:Region"] ?? "us-east-1";
+
+if (!string.IsNullOrEmpty(awsAccessKey) && !string.IsNullOrEmpty(awsSecretKey))
+{
+    var credentials = new BasicAWSCredentials(awsAccessKey, awsSecretKey);
+    builder.Services.AddSingleton<IAmazonS3>(sp => new AmazonS3Client(credentials, Amazon.RegionEndpoint.GetBySystemName(awsRegion)));
+}
+else
+{
+    // Use default AWS credentials chain (IAM roles, environment variables, etc.)
+    builder.Services.AddSingleton<IAmazonS3>(sp => new AmazonS3Client(Amazon.RegionEndpoint.GetBySystemName(awsRegion)));
+}
 
 // Register brand context as scoped service
 builder.Services.AddScoped<BrandContext>();
@@ -61,6 +79,9 @@ builder.Services.AddScoped<IPlayerService, PlayerService>();
 builder.Services.AddScoped<IBrandGameService, BrandGameService>();
 builder.Services.AddScoped<ICashierPlayerService, CashierPlayerService>();
 
+// ✅ NEW: Balance service - get balance of logged-in user
+builder.Services.AddScoped<IBalanceService, BalanceService>();
+
 // SONNET: Unified user service - RESTAURA funcionalidad original de /users
 builder.Services.AddScoped<IUnifiedUserService, UnifiedUserService>();
 
@@ -75,6 +96,10 @@ builder.Services.AddScoped<ICommissionService, CommissionService>();
 
 // NEW: Dashboard service - backoffice dashboard data
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+
+// NEW: Brand Assets service - S3 and brand assets management
+builder.Services.AddScoped<IS3Service, S3Service>();
+builder.Services.AddScoped<IBrandAssetsService, BrandAssetsService>();
 
 // SONNET: Wallet services - UNIFIED SYSTEM
 // Unified wallet service for gateway/games (uses Player.WalletBalance + WalletTransactions)
@@ -292,6 +317,11 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser()
               .AddAuthenticationSchemes("BackofficeJwt")
               .RequireClaim(ClaimTypes.Role, "SUPER_ADMIN", "BRAND_ADMIN", "CASHIER"));
+    
+    // ✅ NEW: Política para cualquier usuario autenticado (BACKOFFICE O PLAYER)
+    options.AddPolicy("AnyAuthenticatedUser", policy =>
+        policy.RequireAuthenticatedUser()
+   .AddAuthenticationSchemes("BackofficeJwt", "PlayerJwt"));
 });
 
 // Add health checks
@@ -315,6 +345,9 @@ builder.Services.AddSwaggerGen(c =>
     c.ResolveConflictingActions(apiDescriptions =>
         apiDescriptions.OrderByDescending(d => d.SupportedResponseTypes.Count).First());
     
+    // NEW: Add file upload operation filter for proper Swagger documentation
+    c.OperationFilter<FileUploadOperationFilter>();
+    
     // Add JWT Bearer security schemes
     c.AddSecurityDefinition("BackofficeBearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
@@ -326,7 +359,7 @@ builder.Services.AddSwaggerGen(c =>
         Description = "JWT Authorization header for backoffice users (audience: backoffice)"
     });
     
-    c.AddSecurityDefinition("PlayerBearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+  c.AddSecurityDefinition("PlayerBearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
         Name = "Authorization",
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
@@ -418,6 +451,9 @@ app.MapHealthChecks("/health")
 // SONNET: Map authentication endpoints (unprotected)
 app.MapAuthEndpoints();
 
+// ✅ NEW: Balance endpoint (PROTECTED - requires JWT)
+app.MapBalanceEndpoints();
+
 // ✅ NEW: Casino launch endpoints (PUBLIC - no auth required)
 app.MapCasinoEndpoints();
 
@@ -455,6 +491,9 @@ adminGroup.MapUnifiedUserEndpoints();
 
 // SONNET: USER TREE ENDPOINTS - Árbol genealógico de usuarios
 adminGroup.MapUserTreeEndpoints();
+
+// NEW: Brand Assets Endpoints - S3 and brand assets management
+adminGroup.MapBrandAssetsEndpoints();
 
 // SONNET: DEPRECATED - Endpoints específicos por tipo de usuario (comentados para evitar duplicación)
 // adminGroup.MapBrandOnlyBackofficeUserEndpoints();
